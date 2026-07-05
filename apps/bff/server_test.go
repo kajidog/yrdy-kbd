@@ -24,6 +24,7 @@ type fakeKVSClient struct {
 	lastSessionInput   SessionInput
 	lastSignInput      SignalingURLInput
 	lastHLSInput       HLSPlaybackInput
+	sessionConfigCalls int
 }
 
 func (f *fakeKVSClient) EnsureSignalingChannel(_ context.Context, channelName string) (string, error) {
@@ -32,6 +33,7 @@ func (f *fakeKVSClient) EnsureSignalingChannel(_ context.Context, channelName st
 }
 
 func (f *fakeKVSClient) SessionConfig(_ context.Context, input SessionInput) (SessionConfig, error) {
+	f.sessionConfigCalls++
 	f.lastSessionInput = input
 	session := f.session
 	session.Role = input.Role
@@ -187,6 +189,36 @@ func TestPublisherSessionRequiresOwner(t *testing.T) {
 	created := createTestLive(t, server, owner, map[string]any{"title": "owner only", "public": true})
 
 	requestJSONAs[map[string]string](t, server, http.MethodPost, "/api/lives/"+created.ID+"/publisher-session", viewer, map[string]any{}, http.StatusForbidden)
+}
+
+func TestPublisherSessionRejectsEndedLive(t *testing.T) {
+	server, kvs := newTestServer(t)
+	owner, _ := tokens(t)
+	created := createTestLive(t, server, owner, map[string]any{
+		"title":  "recorded once",
+		"public": true,
+		"record": true,
+	})
+
+	requestJSONAs[sessionResponse](t, server, http.MethodPost, "/api/lives/"+created.ID+"/publisher-session", owner, map[string]any{}, http.StatusOK)
+	stopped := requestJSONAs[liveResponse](t, server, http.MethodPost, "/api/lives/"+created.ID+"/stop", owner, map[string]any{}, http.StatusOK)
+	if stopped.EndedAt == nil {
+		t.Fatal("expected stopped live to have endedAt")
+	}
+
+	callsBefore := kvs.sessionConfigCalls
+	requestJSONAs[map[string]string](t, server, http.MethodPost, "/api/lives/"+created.ID+"/publisher-session", owner, map[string]any{}, http.StatusConflict)
+	if kvs.sessionConfigCalls != callsBefore {
+		t.Fatalf("SessionConfig calls = %d, want %d", kvs.sessionConfigCalls, callsBefore)
+	}
+
+	live := requestJSONAs[liveResponse](t, server, http.MethodGet, "/api/lives/"+created.ID, owner, nil, http.StatusOK)
+	if live.Status != LiveStatusEnded {
+		t.Fatalf("status after rejected publisher session = %q, want ended", live.Status)
+	}
+	if live.EndedAt == nil {
+		t.Fatal("expected endedAt to remain set")
+	}
 }
 
 func TestViewerSessionPassphraseAndStatus(t *testing.T) {

@@ -251,6 +251,10 @@ func (s *Server) handlePublisherSession(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusForbidden, fmt.Errorf("only the owner can broadcast this live"))
 		return
 	}
+	if live.Status == LiveStatusEnded {
+		writeError(w, http.StatusConflict, fmt.Errorf("ended lives cannot be restarted"))
+		return
+	}
 
 	session, err := s.kvs.SessionConfig(r.Context(), SessionInput{
 		ChannelARN: live.ChannelARN,

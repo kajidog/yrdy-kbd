@@ -183,7 +183,7 @@ function Dashboard({ session, onSignOut }: { session: AuthSession; onSignOut: ()
   }
 
   const isLive = status === 'live'
-  const canBroadcast = Boolean(selected) && !isLive && status !== 'starting'
+  const canBroadcast = selected !== null && selected.status !== 'ended' && !isLive && status !== 'starting'
 
   return (
     <main className="app-shell">
