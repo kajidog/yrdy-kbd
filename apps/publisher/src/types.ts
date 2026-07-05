@@ -13,7 +13,7 @@ export type IceServerConfig = {
 }
 
 export type SessionConfig = {
-  roomId: string
+  liveId: string
   role: Role
   region: string
   channelArn: string
@@ -21,10 +21,22 @@ export type SessionConfig = {
   iceServers: IceServerConfig[]
 }
 
-export type CreateRoomResponse = {
-  roomId: string
-  channelArn: string
-  publishUrl: string
+export type LiveStatus = 'created' | 'live' | 'ended'
+
+export type LiveSummary = {
+  id: string
+  title: string
+  ownerName: string
+  public: boolean
+  record: boolean
+  status: LiveStatus
+  hasPassphrase: boolean
+  hasRecording: boolean
+  owned: boolean
+  createdAt: string
+  startedAt?: string
+  endedAt?: string
+  durationSeconds?: number
   watchUrl: string
 }
 

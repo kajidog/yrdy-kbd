@@ -24,14 +24,19 @@ func run() error {
 	}
 
 	ctx := context.Background()
-	kvs, err := NewAWSKVSClient(ctx, cfg.Region)
+	kvs, err := NewAWSKVSClient(ctx, cfg.Region, cfg.RetentionHours)
+	if err != nil {
+		return err
+	}
+
+	lives, err := NewLiveStore(cfg.DataFile)
 	if err != nil {
 		return err
 	}
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           NewServer(cfg, kvs, NewRoomStore()),
+		Handler:           NewServer(cfg, kvs, lives),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

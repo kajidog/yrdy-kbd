@@ -4,13 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/kinesisvideo"
 	kvtypes "github.com/aws/aws-sdk-go-v2/service/kinesisvideo/types"
+	"github.com/aws/aws-sdk-go-v2/service/kinesisvideoarchivedmedia"
+	hlstypes "github.com/aws/aws-sdk-go-v2/service/kinesisvideoarchivedmedia/types"
 	"github.com/aws/aws-sdk-go-v2/service/kinesisvideosignaling"
 	sigtypes "github.com/aws/aws-sdk-go-v2/service/kinesisvideosignaling/types"
+	"github.com/aws/aws-sdk-go-v2/service/kinesisvideowebrtcstorage"
 )
 
 type Role string
@@ -51,27 +55,42 @@ type SignalingURLInput struct {
 	QueryParams map[string]string
 }
 
+type HLSPlaybackInput struct {
+	StreamARN string
+	// Live selects LIVE playback (broadcast still running); otherwise the
+	// recording between Start and End is served ON_DEMAND.
+	Live  bool
+	Start time.Time
+	End   time.Time
+}
+
 type KVSClient interface {
 	EnsureSignalingChannel(ctx context.Context, channelName string) (string, error)
 	SessionConfig(ctx context.Context, input SessionInput) (SessionConfig, error)
 	SignalingURL(ctx context.Context, input SignalingURLInput) (string, error)
+	EnsureStream(ctx context.Context, streamName string) (string, error)
+	ConfigureMediaStorage(ctx context.Context, channelARN, streamARN string) error
+	JoinStorageSession(ctx context.Context, channelARN string) error
+	HLSPlaybackURL(ctx context.Context, input HLSPlaybackInput) (string, error)
 }
 
 type AWSKVSClient struct {
-	region string
-	cfg    aws.Config
-	video  *kinesisvideo.Client
+	region         string
+	retentionHours int32
+	cfg            aws.Config
+	video          *kinesisvideo.Client
 }
 
-func NewAWSKVSClient(ctx context.Context, region string) (*AWSKVSClient, error) {
+func NewAWSKVSClient(ctx context.Context, region string, retentionHours int32) (*AWSKVSClient, error) {
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
 	if err != nil {
 		return nil, fmt.Errorf("load AWS config: %w", err)
 	}
 	return &AWSKVSClient{
-		region: region,
-		cfg:    cfg,
-		video:  kinesisvideo.NewFromConfig(cfg),
+		region:         region,
+		retentionHours: retentionHours,
+		cfg:            cfg,
+		video:          kinesisvideo.NewFromConfig(cfg),
 	}, nil
 }
 
@@ -146,6 +165,135 @@ func (c *AWSKVSClient) SessionConfig(ctx context.Context, input SessionInput) (S
 		Endpoints:  endpoints,
 		ICEServers: iceServersFromKVS(c.region, iceOut.IceServerList),
 	}, nil
+}
+
+// EnsureStream creates (or reuses) the KVS video stream that WebRTC media
+// ingestion records into, and returns its ARN.
+func (c *AWSKVSClient) EnsureStream(ctx context.Context, streamName string) (string, error) {
+	described, err := c.video.DescribeStream(ctx, &kinesisvideo.DescribeStreamInput{
+		StreamName: aws.String(streamName),
+	})
+	if err == nil {
+		if described.StreamInfo == nil || described.StreamInfo.StreamARN == nil {
+			return "", fmt.Errorf("describe stream returned no ARN")
+		}
+		return *described.StreamInfo.StreamARN, nil
+	}
+	if !isKVSNotFound(err) {
+		return "", fmt.Errorf("describe stream: %w", err)
+	}
+
+	created, err := c.video.CreateStream(ctx, &kinesisvideo.CreateStreamInput{
+		StreamName:           aws.String(streamName),
+		DataRetentionInHours: aws.Int32(c.retentionHours),
+	})
+	if err != nil {
+		return "", fmt.Errorf("create stream: %w", err)
+	}
+	if created.StreamARN == nil {
+		return "", fmt.Errorf("create stream returned no ARN")
+	}
+	return *created.StreamARN, nil
+}
+
+// ConfigureMediaStorage links the signaling channel to the stream so KVS
+// records the master's WebRTC media into it.
+func (c *AWSKVSClient) ConfigureMediaStorage(ctx context.Context, channelARN, streamARN string) error {
+	_, err := c.video.UpdateMediaStorageConfiguration(ctx, &kinesisvideo.UpdateMediaStorageConfigurationInput{
+		ChannelARN: aws.String(channelARN),
+		MediaStorageConfiguration: &kvtypes.MediaStorageConfiguration{
+			Status:    kvtypes.MediaStorageConfigurationStatusEnabled,
+			StreamARN: aws.String(streamARN),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("update media storage configuration: %w", err)
+	}
+	return nil
+}
+
+// JoinStorageSession asks KVS to join the channel as the recording peer. The
+// master must already be connected to signaling; KVS then sends it an SDP
+// offer and archives the negotiated media into the configured stream.
+func (c *AWSKVSClient) JoinStorageSession(ctx context.Context, channelARN string) error {
+	endpointOut, err := c.video.GetSignalingChannelEndpoint(ctx, &kinesisvideo.GetSignalingChannelEndpointInput{
+		ChannelARN: aws.String(channelARN),
+		SingleMasterChannelEndpointConfiguration: &kvtypes.SingleMasterChannelEndpointConfiguration{
+			Protocols: []kvtypes.ChannelProtocol{kvtypes.ChannelProtocolWebrtc},
+			Role:      kvtypes.ChannelRoleMaster,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("get WEBRTC channel endpoint: %w", err)
+	}
+
+	var endpoint string
+	for _, item := range endpointOut.ResourceEndpointList {
+		if item.Protocol == kvtypes.ChannelProtocolWebrtc && item.ResourceEndpoint != nil {
+			endpoint = *item.ResourceEndpoint
+		}
+	}
+	if endpoint == "" {
+		return fmt.Errorf("KVS did not return a WEBRTC endpoint")
+	}
+
+	storage := kinesisvideowebrtcstorage.NewFromConfig(c.cfg, func(o *kinesisvideowebrtcstorage.Options) {
+		o.BaseEndpoint = aws.String(endpoint)
+	})
+	if _, err := storage.JoinStorageSession(ctx, &kinesisvideowebrtcstorage.JoinStorageSessionInput{
+		ChannelArn: aws.String(channelARN),
+	}); err != nil {
+		return fmt.Errorf("join storage session: %w", err)
+	}
+	return nil
+}
+
+func (c *AWSKVSClient) HLSPlaybackURL(ctx context.Context, input HLSPlaybackInput) (string, error) {
+	endpointOut, err := c.video.GetDataEndpoint(ctx, &kinesisvideo.GetDataEndpointInput{
+		APIName:   kvtypes.APINameGetHlsStreamingSessionUrl,
+		StreamARN: aws.String(input.StreamARN),
+	})
+	if err != nil {
+		return "", fmt.Errorf("get data endpoint: %w", err)
+	}
+	if endpointOut.DataEndpoint == nil {
+		return "", fmt.Errorf("get data endpoint returned no endpoint")
+	}
+
+	archived := kinesisvideoarchivedmedia.NewFromConfig(c.cfg, func(o *kinesisvideoarchivedmedia.Options) {
+		o.BaseEndpoint = endpointOut.DataEndpoint
+	})
+
+	request := &kinesisvideoarchivedmedia.GetHLSStreamingSessionURLInput{
+		StreamARN:       aws.String(input.StreamARN),
+		ContainerFormat: hlstypes.ContainerFormatFragmentedMp4,
+		// ALWAYS adds EXT-X-PROGRAM-DATE-TIME tags so players can map media
+		// positions back to wall-clock time.
+		DisplayFragmentTimestamp: hlstypes.HLSDisplayFragmentTimestampAlways,
+		Expires:                  aws.Int32(43200),
+	}
+	if input.Live {
+		request.PlaybackMode = hlstypes.HLSPlaybackModeLive
+	} else {
+		request.PlaybackMode = hlstypes.HLSPlaybackModeOnDemand
+		request.MaxMediaPlaylistFragmentResults = aws.Int64(5000)
+		request.HLSFragmentSelector = &hlstypes.HLSFragmentSelector{
+			FragmentSelectorType: hlstypes.HLSFragmentSelectorTypeServerTimestamp,
+			TimestampRange: &hlstypes.HLSTimestampRange{
+				StartTimestamp: aws.Time(input.Start),
+				EndTimestamp:   aws.Time(input.End),
+			},
+		}
+	}
+
+	out, err := archived.GetHLSStreamingSessionURL(ctx, request)
+	if err != nil {
+		return "", fmt.Errorf("get HLS streaming session URL: %w", err)
+	}
+	if out.HLSStreamingSessionURL == nil {
+		return "", fmt.Errorf("HLS streaming session URL missing in response")
+	}
+	return *out.HLSStreamingSessionURL, nil
 }
 
 func (c *AWSKVSClient) SignalingURL(ctx context.Context, input SignalingURLInput) (string, error) {

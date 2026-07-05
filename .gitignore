@@ -13,6 +13,10 @@ dist-ssr/
 
 # Go / Air hot-reload build artifacts
 tmp/
+apps/bff/bff
+
+# BFF live metadata store
+apps/bff/data/
 
 # Local AWS CLI installation (not part of the project)
 /aws/

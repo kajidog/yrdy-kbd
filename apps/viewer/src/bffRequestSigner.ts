@@ -3,8 +3,8 @@ import { signSignalingURL } from './api'
 import type { Role } from './types'
 
 type BFFRequestSignerOptions = {
-  roomId: string
-  passphrase: string
+  liveId: string
+  passphrase?: string
   role: Role
   clientId?: string
 }
@@ -13,7 +13,7 @@ export function createBFFRequestSigner(options: BFFRequestSignerOptions): Reques
   return {
     async getSignedURL(endpoint: string, queryParams: QueryParams, _date?: Date) {
       const response = await signSignalingURL({
-        roomId: options.roomId,
+        liveId: options.liveId,
         passphrase: options.passphrase,
         role: options.role,
         clientId: options.clientId,
