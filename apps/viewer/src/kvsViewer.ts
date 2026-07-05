@@ -7,8 +7,8 @@ export type ViewerRuntime = {
 }
 
 type StartViewerOptions = {
-  roomId: string
-  passphrase: string
+  liveId: string
+  passphrase?: string
   clientId: string
   session: SessionConfig
   onRemoteStream: (stream: MediaStream) => void
@@ -40,7 +40,7 @@ export async function startViewer(options: StartViewerOptions): Promise<ViewerRu
     region: options.session.region,
     clientId: options.clientId,
     requestSigner: createBFFRequestSigner({
-      roomId: options.roomId,
+      liveId: options.liveId,
       passphrase: options.passphrase,
       role: 'VIEWER',
       clientId: options.clientId,

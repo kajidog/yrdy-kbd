@@ -1,33 +1,56 @@
-import type { Role, SessionConfig, SignalingURLResponse } from './types'
+import { getIdToken } from './auth'
+import type { LiveSummary, PlaybackInfo, Role, SessionConfig, SignalingURLResponse } from './types'
 
 const bffBaseURL = import.meta.env.VITE_BFF_BASE_URL ?? 'http://localhost:8080'
 
+export async function searchLives(query: string): Promise<LiveSummary[]> {
+  const params = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ''
+  const response = await requestJSON<{ lives: LiveSummary[] }>(`/api/lives${params}`, {
+    method: 'GET',
+  })
+  return response.lives
+}
+
+export async function getLive(liveId: string): Promise<LiveSummary> {
+  return requestJSON<LiveSummary>(`/api/lives/${liveId}`, { method: 'GET' })
+}
+
 export async function createViewerSession(input: {
-  roomId: string
-  passphrase: string
+  liveId: string
+  passphrase?: string
   clientId: string
 }): Promise<SessionConfig> {
-  return requestJSON<SessionConfig>(`/api/rooms/${input.roomId}/viewer-session`, {
+  return requestJSON<SessionConfig>(`/api/lives/${input.liveId}/viewer-session`, {
     method: 'POST',
     body: JSON.stringify({
-      passphrase: input.passphrase,
+      passphrase: input.passphrase || undefined,
       clientId: input.clientId,
     }),
   })
 }
 
+export async function getPlayback(input: {
+  liveId: string
+  passphrase?: string
+}): Promise<PlaybackInfo> {
+  return requestJSON<PlaybackInfo>(`/api/lives/${input.liveId}/playback`, {
+    method: 'POST',
+    body: JSON.stringify({ passphrase: input.passphrase || undefined }),
+  })
+}
+
 export async function signSignalingURL(input: {
-  roomId: string
-  passphrase: string
+  liveId: string
+  passphrase?: string
   role: Role
   clientId?: string
   endpoint: string
   queryParams: Record<string, string>
 }): Promise<SignalingURLResponse> {
-  return requestJSON<SignalingURLResponse>(`/api/rooms/${input.roomId}/signaling-url`, {
+  return requestJSON<SignalingURLResponse>(`/api/lives/${input.liveId}/signaling-url`, {
     method: 'POST',
     body: JSON.stringify({
-      passphrase: input.passphrase,
+      passphrase: input.passphrase || undefined,
       role: input.role,
       clientId: input.clientId,
       endpoint: input.endpoint,
@@ -37,10 +60,12 @@ export async function signSignalingURL(input: {
 }
 
 async function requestJSON<T>(path: string, init: RequestInit): Promise<T> {
+  const token = await getIdToken()
   const response = await fetch(`${bffBaseURL}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
       ...init.headers,
     },
   })

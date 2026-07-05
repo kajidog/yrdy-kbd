@@ -7,12 +7,15 @@ export type PublisherRuntime = {
 }
 
 type StartPublisherOptions = {
-  roomId: string
-  passphrase: string
+  liveId: string
   session: SessionConfig
   stream: MediaStream
   onStatus: (message: string) => void
   onPeerCount: (count: number) => void
+  // Fired once the signaling socket is open. Used to ask the BFF to join the
+  // storage session when recording: KVS then sends this master an SDP offer
+  // like any other viewer and archives the answered media.
+  onSignalingOpen?: () => void
 }
 
 type PeerEntry = {
@@ -44,8 +47,7 @@ export async function startPublisher(options: StartPublisherOptions): Promise<Pu
     channelEndpoint: options.session.endpoints.wss,
     region: options.session.region,
     requestSigner: createBFFRequestSigner({
-      roomId: options.roomId,
-      passphrase: options.passphrase,
+      liveId: options.liveId,
       role: 'MASTER',
     }),
     enableEarlyIceCandidateBuffering: true,
@@ -63,6 +65,7 @@ export async function startPublisher(options: StartPublisherOptions): Promise<Pu
 
   signalingClient.on('open', () => {
     options.onStatus('KVS signaling connected')
+    options.onSignalingOpen?.()
   })
 
   signalingClient.on('close', () => {
@@ -139,6 +142,30 @@ export async function startPublisher(options: StartPublisherOptions): Promise<Pu
       }
       peers.clear()
       options.onPeerCount(0)
+    },
+  }
+}
+
+// KVS WebRTC media ingestion requires both a video and an audio track. Screen
+// captures often have no audio, so recording-enabled lives get a silent Opus
+// track appended.
+export function createSilentAudioTrack(): { track: MediaStreamTrack; stop: () => void } {
+  const audioContext = new AudioContext()
+  const destination = audioContext.createMediaStreamDestination()
+  const oscillator = audioContext.createOscillator()
+  const gain = audioContext.createGain()
+  gain.gain.value = 0
+  oscillator.connect(gain)
+  gain.connect(destination)
+  oscillator.start()
+
+  const track = destination.stream.getAudioTracks()[0]
+  return {
+    track,
+    stop() {
+      oscillator.stop()
+      track.stop()
+      void audioContext.close()
     },
   }
 }

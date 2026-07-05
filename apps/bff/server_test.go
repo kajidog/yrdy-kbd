@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,12 +12,18 @@ import (
 
 type fakeKVSClient struct {
 	channelARN string
+	streamARN  string
 	session    SessionConfig
 	signedURL  string
+	hlsURL     string
 
 	ensuredChannelName string
+	ensuredStreamName  string
+	storageChannelARN  string
+	joinedChannelARN   string
 	lastSessionInput   SessionInput
 	lastSignInput      SignalingURLInput
+	lastHLSInput       HLSPlaybackInput
 }
 
 func (f *fakeKVSClient) EnsureSignalingChannel(_ context.Context, channelName string) (string, error) {
@@ -37,10 +44,33 @@ func (f *fakeKVSClient) SignalingURL(_ context.Context, input SignalingURLInput)
 	return f.signedURL, nil
 }
 
-func newTestServer() (*Server, *fakeKVSClient) {
+func (f *fakeKVSClient) EnsureStream(_ context.Context, streamName string) (string, error) {
+	f.ensuredStreamName = streamName
+	return f.streamARN, nil
+}
+
+func (f *fakeKVSClient) ConfigureMediaStorage(_ context.Context, channelARN, _ string) error {
+	f.storageChannelARN = channelARN
+	return nil
+}
+
+func (f *fakeKVSClient) JoinStorageSession(_ context.Context, channelARN string) error {
+	f.joinedChannelARN = channelARN
+	return nil
+}
+
+func (f *fakeKVSClient) HLSPlaybackURL(_ context.Context, input HLSPlaybackInput) (string, error) {
+	f.lastHLSInput = input
+	return f.hlsURL, nil
+}
+
+func newTestServer(t *testing.T) (*Server, *fakeKVSClient) {
+	t.Helper()
 	kvs := &fakeKVSClient{
 		channelARN: "arn:aws:kinesisvideo:ap-northeast-1:123456789012:channel/yrdy-kbd-test/1",
+		streamARN:  "arn:aws:kinesisvideo:ap-northeast-1:123456789012:stream/yrdy-kbd-test/1",
 		signedURL:  "wss://signed.example.test",
+		hlsURL:     "https://hls.example.test/session.m3u8",
 		session: SessionConfig{
 			Region: "ap-northeast-1",
 			Endpoints: EndpointSet{
@@ -56,74 +86,258 @@ func newTestServer() (*Server, *fakeKVSClient) {
 		PublisherOrigin: "http://publisher.test",
 		ViewerOrigin:    "http://viewer.test",
 	}
-	return NewServer(cfg, kvs, NewRoomStore()), kvs
+	lives, err := NewLiveStore("")
+	if err != nil {
+		t.Fatalf("new live store: %v", err)
+	}
+	return NewServer(cfg, kvs, lives), kvs
 }
 
-func TestCreateRoomAndPublisherSession(t *testing.T) {
-	server, kvs := newTestServer()
+func bearerToken(t *testing.T, sub, username string) string {
+	t.Helper()
+	payload, err := json.Marshal(map[string]string{
+		"sub":              sub,
+		"cognito:username": username,
+	})
+	if err != nil {
+		t.Fatalf("marshal claims: %v", err)
+	}
+	segment := base64.RawURLEncoding.EncodeToString
+	return segment([]byte(`{"alg":"RS256","typ":"JWT"}`)) + "." + segment(payload) + "." + segment([]byte("sig"))
+}
 
-	createRes := postJSON[createRoomResponse](t, server, "/api/rooms", map[string]string{
+var (
+	ownerToken  = ""
+	viewerToken = ""
+)
+
+func tokens(t *testing.T) (owner, viewer string) {
+	if ownerToken == "" {
+		ownerToken = bearerToken(t, "owner-sub", "alice")
+		viewerToken = bearerToken(t, "viewer-sub", "bob")
+	}
+	return ownerToken, viewerToken
+}
+
+func createTestLive(t *testing.T, server *Server, token string, body map[string]any) liveResponse {
+	t.Helper()
+	return requestJSONAs[liveResponse](t, server, http.MethodPost, "/api/lives", token, body, http.StatusCreated)
+}
+
+func TestRequestsWithoutTokenAreRejected(t *testing.T) {
+	server, _ := newTestServer(t)
+	requestJSONAs[map[string]string](t, server, http.MethodPost, "/api/lives", "", map[string]any{
+		"title": "no auth",
+	}, http.StatusUnauthorized)
+}
+
+func TestCreateLiveAndPublisherSession(t *testing.T) {
+	server, kvs := newTestServer(t)
+	owner, _ := tokens(t)
+
+	created := createTestLive(t, server, owner, map[string]any{
+		"title":      "morning stream",
 		"passphrase": "open-sesame",
-	}, http.StatusCreated)
+		"public":     true,
+		"record":     true,
+	})
 
-	if createRes.RoomID == "" {
-		t.Fatal("expected room id")
+	if created.ID == "" {
+		t.Fatal("expected live id")
 	}
-	if createRes.ChannelARN != kvs.channelARN {
-		t.Fatalf("unexpected channel arn: %s", createRes.ChannelARN)
+	if !created.HasPassphrase || !created.Record || !created.Public {
+		t.Fatalf("unexpected live flags: %+v", created)
 	}
-	if got, want := kvs.ensuredChannelName, channelNameForRoom(createRes.RoomID); got != want {
+	if created.OwnerName != "alice" {
+		t.Fatalf("owner name = %q, want alice", created.OwnerName)
+	}
+	if got, want := kvs.ensuredChannelName, channelNameForLive(created.ID); got != want {
 		t.Fatalf("ensured channel name = %q, want %q", got, want)
 	}
-	if createRes.PublishURL != "http://publisher.test?roomId="+createRes.RoomID {
-		t.Fatalf("unexpected publish URL: %s", createRes.PublishURL)
+	if got, want := kvs.ensuredStreamName, streamNameForLive(created.ID); got != want {
+		t.Fatalf("ensured stream name = %q, want %q", got, want)
 	}
-	if createRes.WatchURL != "http://viewer.test?roomId="+createRes.RoomID {
-		t.Fatalf("unexpected watch URL: %s", createRes.WatchURL)
+	if kvs.storageChannelARN != kvs.channelARN {
+		t.Fatalf("media storage configured for %q, want %q", kvs.storageChannelARN, kvs.channelARN)
+	}
+	if created.WatchURL != "http://viewer.test?liveId="+created.ID {
+		t.Fatalf("unexpected watch URL: %s", created.WatchURL)
+	}
+	if created.Status != LiveStatusCreated {
+		t.Fatalf("status = %q, want created", created.Status)
 	}
 
-	sessionRes := postJSON[sessionResponse](t, server, "/api/rooms/"+createRes.RoomID+"/publisher-session", map[string]string{
-		"passphrase": "open-sesame",
-	}, http.StatusOK)
-
-	if sessionRes.Role != RoleMaster {
-		t.Fatalf("session role = %q, want MASTER", sessionRes.Role)
+	session := requestJSONAs[sessionResponse](t, server, http.MethodPost, "/api/lives/"+created.ID+"/publisher-session", owner, map[string]any{}, http.StatusOK)
+	if session.Role != RoleMaster {
+		t.Fatalf("session role = %q, want MASTER", session.Role)
 	}
-	if kvs.lastSessionInput.Role != RoleMaster {
-		t.Fatalf("last session role = %q, want MASTER", kvs.lastSessionInput.Role)
+
+	live := requestJSONAs[liveResponse](t, server, http.MethodGet, "/api/lives/"+created.ID, owner, nil, http.StatusOK)
+	if live.Status != LiveStatusLive {
+		t.Fatalf("status after publisher session = %q, want live", live.Status)
+	}
+	if live.StartedAt == nil {
+		t.Fatal("expected startedAt to be set")
 	}
 }
 
-func TestSessionRejectsWrongPassphrase(t *testing.T) {
-	server, _ := newTestServer()
-	createRes := postJSON[createRoomResponse](t, server, "/api/rooms", map[string]string{
-		"passphrase": "correct",
-	}, http.StatusCreated)
+func TestPublisherSessionRequiresOwner(t *testing.T) {
+	server, _ := newTestServer(t)
+	owner, viewer := tokens(t)
+	created := createTestLive(t, server, owner, map[string]any{"title": "owner only", "public": true})
 
-	postJSON[map[string]string](t, server, "/api/rooms/"+createRes.RoomID+"/viewer-session", map[string]string{
+	requestJSONAs[map[string]string](t, server, http.MethodPost, "/api/lives/"+created.ID+"/publisher-session", viewer, map[string]any{}, http.StatusForbidden)
+}
+
+func TestViewerSessionPassphraseAndStatus(t *testing.T) {
+	server, _ := newTestServer(t)
+	owner, viewer := tokens(t)
+	created := createTestLive(t, server, owner, map[string]any{
+		"title":      "guarded",
+		"passphrase": "correct",
+		"public":     false,
+	})
+
+	// Not broadcasting yet.
+	requestJSONAs[map[string]string](t, server, http.MethodPost, "/api/lives/"+created.ID+"/viewer-session", viewer, map[string]any{
+		"passphrase": "correct",
+		"clientId":   "viewer-1",
+	}, http.StatusConflict)
+
+	requestJSONAs[sessionResponse](t, server, http.MethodPost, "/api/lives/"+created.ID+"/publisher-session", owner, map[string]any{}, http.StatusOK)
+
+	requestJSONAs[map[string]string](t, server, http.MethodPost, "/api/lives/"+created.ID+"/viewer-session", viewer, map[string]any{
 		"passphrase": "wrong",
 		"clientId":   "viewer-1",
 	}, http.StatusForbidden)
-}
 
-func TestViewerSessionRequiresClientID(t *testing.T) {
-	server, _ := newTestServer()
-	createRes := postJSON[createRoomResponse](t, server, "/api/rooms", map[string]string{
-		"passphrase": "correct",
-	}, http.StatusCreated)
-
-	postJSON[map[string]string](t, server, "/api/rooms/"+createRes.RoomID+"/viewer-session", map[string]string{
+	requestJSONAs[map[string]string](t, server, http.MethodPost, "/api/lives/"+created.ID+"/viewer-session", viewer, map[string]any{
 		"passphrase": "correct",
 	}, http.StatusBadRequest)
+
+	session := requestJSONAs[sessionResponse](t, server, http.MethodPost, "/api/lives/"+created.ID+"/viewer-session", viewer, map[string]any{
+		"passphrase": "correct",
+		"clientId":   "viewer-1",
+	}, http.StatusOK)
+	if session.Role != RoleViewer {
+		t.Fatalf("session role = %q, want VIEWER", session.Role)
+	}
+}
+
+func TestLiveWithoutPassphraseIsOpen(t *testing.T) {
+	server, _ := newTestServer(t)
+	owner, viewer := tokens(t)
+	created := createTestLive(t, server, owner, map[string]any{"title": "open live", "public": true})
+	if created.HasPassphrase {
+		t.Fatal("expected no passphrase")
+	}
+
+	requestJSONAs[sessionResponse](t, server, http.MethodPost, "/api/lives/"+created.ID+"/publisher-session", owner, map[string]any{}, http.StatusOK)
+	requestJSONAs[sessionResponse](t, server, http.MethodPost, "/api/lives/"+created.ID+"/viewer-session", viewer, map[string]any{
+		"clientId": "viewer-1",
+	}, http.StatusOK)
+}
+
+func TestSearchListsPublicLivesOnly(t *testing.T) {
+	server, _ := newTestServer(t)
+	owner, viewer := tokens(t)
+
+	public := createTestLive(t, server, owner, map[string]any{"title": "public gaming", "public": true})
+	private := createTestLive(t, server, owner, map[string]any{"title": "secret meeting", "public": false})
+	requestJSONAs[sessionResponse](t, server, http.MethodPost, "/api/lives/"+public.ID+"/publisher-session", owner, map[string]any{}, http.StatusOK)
+	requestJSONAs[sessionResponse](t, server, http.MethodPost, "/api/lives/"+private.ID+"/publisher-session", owner, map[string]any{}, http.StatusOK)
+
+	type liveList struct {
+		Lives []liveResponse `json:"lives"`
+	}
+
+	all := requestJSONAs[liveList](t, server, http.MethodGet, "/api/lives", viewer, nil, http.StatusOK)
+	if len(all.Lives) != 1 || all.Lives[0].ID != public.ID {
+		t.Fatalf("search should list only the public live, got %+v", all.Lives)
+	}
+
+	byTitle := requestJSONAs[liveList](t, server, http.MethodGet, "/api/lives?q=gaming", viewer, nil, http.StatusOK)
+	if len(byTitle.Lives) != 1 {
+		t.Fatalf("expected title match, got %+v", byTitle.Lives)
+	}
+
+	byOwner := requestJSONAs[liveList](t, server, http.MethodGet, "/api/lives?q=ALICE", viewer, nil, http.StatusOK)
+	if len(byOwner.Lives) != 1 {
+		t.Fatalf("expected owner-name match, got %+v", byOwner.Lives)
+	}
+
+	none := requestJSONAs[liveList](t, server, http.MethodGet, "/api/lives?q=nothing", viewer, nil, http.StatusOK)
+	if len(none.Lives) != 0 {
+		t.Fatalf("expected no match, got %+v", none.Lives)
+	}
+
+	mine := requestJSONAs[liveList](t, server, http.MethodGet, "/api/me/lives", owner, nil, http.StatusOK)
+	if len(mine.Lives) != 2 {
+		t.Fatalf("owner should see both lives, got %d", len(mine.Lives))
+	}
+}
+
+func TestPlaybackForRecordedLive(t *testing.T) {
+	server, kvs := newTestServer(t)
+	owner, viewer := tokens(t)
+	created := createTestLive(t, server, owner, map[string]any{
+		"title":  "recorded live",
+		"public": true,
+		"record": true,
+	})
+
+	// No recording before the broadcast started.
+	requestJSONAs[map[string]string](t, server, http.MethodPost, "/api/lives/"+created.ID+"/playback", viewer, map[string]any{}, http.StatusConflict)
+
+	requestJSONAs[sessionResponse](t, server, http.MethodPost, "/api/lives/"+created.ID+"/publisher-session", owner, map[string]any{}, http.StatusOK)
+
+	requestJSONAs[map[string]string](t, server, http.MethodPost, "/api/lives/"+created.ID+"/storage-session", owner, map[string]any{}, http.StatusOK)
+	if kvs.joinedChannelARN != kvs.channelARN {
+		t.Fatalf("storage session joined %q, want %q", kvs.joinedChannelARN, kvs.channelARN)
+	}
+
+	// While live, playback uses LIVE mode.
+	livePlayback := requestJSONAs[playbackResponse](t, server, http.MethodPost, "/api/lives/"+created.ID+"/playback", viewer, map[string]any{}, http.StatusOK)
+	if livePlayback.PlaybackMode != "LIVE" || !kvs.lastHLSInput.Live {
+		t.Fatalf("expected LIVE playback, got %+v", livePlayback)
+	}
+
+	requestJSONAs[liveResponse](t, server, http.MethodPost, "/api/lives/"+created.ID+"/stop", owner, map[string]any{}, http.StatusOK)
+
+	playback := requestJSONAs[playbackResponse](t, server, http.MethodPost, "/api/lives/"+created.ID+"/playback", viewer, map[string]any{}, http.StatusOK)
+	if playback.PlaybackMode != "ON_DEMAND" || kvs.lastHLSInput.Live {
+		t.Fatalf("expected ON_DEMAND playback, got %+v", playback)
+	}
+	if playback.HLSURL != kvs.hlsURL {
+		t.Fatalf("hls url = %q, want %q", playback.HLSURL, kvs.hlsURL)
+	}
+	if kvs.lastHLSInput.StreamARN != kvs.streamARN {
+		t.Fatalf("hls stream arn = %q, want %q", kvs.lastHLSInput.StreamARN, kvs.streamARN)
+	}
+	if playback.StartedAt == nil || playback.EndedAt == nil {
+		t.Fatalf("expected playback range, got %+v", playback)
+	}
+}
+
+func TestStorageSessionRequiresRecordingEnabled(t *testing.T) {
+	server, _ := newTestServer(t)
+	owner, _ := tokens(t)
+	created := createTestLive(t, server, owner, map[string]any{"title": "no recording", "public": true})
+
+	requestJSONAs[map[string]string](t, server, http.MethodPost, "/api/lives/"+created.ID+"/storage-session", owner, map[string]any{}, http.StatusBadRequest)
 }
 
 func TestSignalingURLValidation(t *testing.T) {
-	server, kvs := newTestServer()
-	createRes := postJSON[createRoomResponse](t, server, "/api/rooms", map[string]string{
+	server, kvs := newTestServer(t)
+	owner, viewer := tokens(t)
+	created := createTestLive(t, server, owner, map[string]any{
+		"title":      "signal",
 		"passphrase": "correct",
-	}, http.StatusCreated)
+		"public":     true,
+	})
+	requestJSONAs[sessionResponse](t, server, http.MethodPost, "/api/lives/"+created.ID+"/publisher-session", owner, map[string]any{}, http.StatusOK)
 
-	res := postJSON[signalingURLResponse](t, server, "/api/rooms/"+createRes.RoomID+"/signaling-url", signalingURLRequest{
+	res := requestJSONAs[signalingURLResponse](t, server, http.MethodPost, "/api/lives/"+created.ID+"/signaling-url", viewer, signalingURLRequest{
 		Passphrase: "correct",
 		Role:       string(RoleViewer),
 		ClientID:   "viewer-1",
@@ -133,15 +347,12 @@ func TestSignalingURLValidation(t *testing.T) {
 			"X-Amz-ClientId":   "viewer-1",
 		},
 	}, http.StatusOK)
-
 	if res.SignedURL != kvs.signedURL {
 		t.Fatalf("signed URL = %q, want %q", res.SignedURL, kvs.signedURL)
 	}
-	if kvs.lastSignInput.QueryParams["X-Amz-ClientId"] != "viewer-1" {
-		t.Fatalf("signing input did not include viewer client id")
-	}
 
-	postJSON[map[string]string](t, server, "/api/rooms/"+createRes.RoomID+"/signaling-url", signalingURLRequest{
+	// Mismatched client id in query params.
+	requestJSONAs[map[string]string](t, server, http.MethodPost, "/api/lives/"+created.ID+"/signaling-url", viewer, signalingURLRequest{
 		Passphrase: "correct",
 		Role:       string(RoleViewer),
 		ClientID:   "viewer-1",
@@ -151,23 +362,58 @@ func TestSignalingURLValidation(t *testing.T) {
 			"X-Amz-ClientId":   "viewer-2",
 		},
 	}, http.StatusBadRequest)
+
+	// Only the owner may sign MASTER URLs.
+	requestJSONAs[map[string]string](t, server, http.MethodPost, "/api/lives/"+created.ID+"/signaling-url", viewer, signalingURLRequest{
+		Role:     string(RoleMaster),
+		Endpoint: "wss://v-test.kinesisvideo.ap-northeast-1.amazonaws.com",
+		QueryParams: map[string]string{
+			"X-Amz-ChannelARN": kvs.channelARN,
+		},
+	}, http.StatusForbidden)
 }
 
-func postJSON[T any](t *testing.T, handler http.Handler, path string, body any, wantStatus int) T {
+func TestStopRequiresOwner(t *testing.T) {
+	server, _ := newTestServer(t)
+	owner, viewer := tokens(t)
+	created := createTestLive(t, server, owner, map[string]any{"title": "stop me", "public": true})
+	requestJSONAs[sessionResponse](t, server, http.MethodPost, "/api/lives/"+created.ID+"/publisher-session", owner, map[string]any{}, http.StatusOK)
+
+	requestJSONAs[map[string]string](t, server, http.MethodPost, "/api/lives/"+created.ID+"/stop", viewer, map[string]any{}, http.StatusForbidden)
+
+	stopped := requestJSONAs[liveResponse](t, server, http.MethodPost, "/api/lives/"+created.ID+"/stop", owner, map[string]any{}, http.StatusOK)
+	if stopped.Status != LiveStatusEnded {
+		t.Fatalf("status = %q, want ended", stopped.Status)
+	}
+	if stopped.EndedAt == nil {
+		t.Fatal("expected endedAt to be set")
+	}
+}
+
+func requestJSONAs[T any](t *testing.T, handler http.Handler, method, path, token string, body any, wantStatus int) T {
 	t.Helper()
 
-	payload, err := json.Marshal(body)
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
+	var reader *bytes.Reader
+	if body != nil {
+		payload, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal request: %v", err)
+		}
+		reader = bytes.NewReader(payload)
+	} else {
+		reader = bytes.NewReader(nil)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(payload))
+	req := httptest.NewRequest(method, path, reader)
 	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != wantStatus {
-		t.Fatalf("POST %s status = %d, want %d; body=%s", path, rec.Code, wantStatus, rec.Body.String())
+		t.Fatalf("%s %s status = %d, want %d; body=%s", method, path, rec.Code, wantStatus, rec.Body.String())
 	}
 
 	var decoded T

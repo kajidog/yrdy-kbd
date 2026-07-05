@@ -8,7 +8,9 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.42.1
 	github.com/aws/aws-sdk-go-v2/config v1.32.27
 	github.com/aws/aws-sdk-go-v2/service/kinesisvideo v1.34.7
+	github.com/aws/aws-sdk-go-v2/service/kinesisvideoarchivedmedia v1.34.9
 	github.com/aws/aws-sdk-go-v2/service/kinesisvideosignaling v1.29.8
+	github.com/aws/aws-sdk-go-v2/service/kinesisvideowebrtcstorage v1.21.9
 )
 
 require (

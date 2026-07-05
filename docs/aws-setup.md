@@ -1,11 +1,12 @@
 # AWS設定手順
 
-この手順は、このリポジトリの構成に合わせた Kinesis Video Streams with WebRTC の最小設定です。
+この手順は、このリポジトリの構成に合わせた Kinesis Video Streams with WebRTC + 録画(メディア取り込み)+ Cognito 認証の最小設定です。
 
 - AWS認証情報は `apps/bff` の Go サーバーだけが持ちます。
 - React の publisher/viewer には AWS access key / secret key を置きません。
-- BFF が KVS signaling channel の作成、endpoint/ICE server 情報取得、WSS URL の SigV4 署名を行います。
-- アプリが作る signaling channel 名は `yrdy-kbd-{roomId}` です。
+- BFF が KVS signaling channel / stream の作成、endpoint/ICE server 情報取得、WSS URL の SigV4 署名、録画セッション開始(`JoinStorageSession`)、HLS 再生 URL の発行を行います。
+- アプリが作る signaling channel 名 / stream 名は `yrdy-kbd-{liveId}` です。
+- フロントは Cognito でログインし、ID トークンを `Authorization: Bearer` で BFF に送ります。トークンの署名・発行元検証は CloudFront + Lambda@Edge で行う前提のため、BFF はペイロードのデコードのみ行います(ローカル開発では Cognito 未設定の dev モードで動作可)。
 
 ## 1. 前提ツール
 
@@ -40,7 +41,7 @@ BFF、KVS signaling channel、publisher/viewer の接続先リージョンは同
 
 ## 3. IAMポリシーを作る
 
-BFF の AWS 実行主体に、`yrdy-kbd-*` の signaling channel だけを操作できる権限を付与します。
+BFF の AWS 実行主体に、`yrdy-kbd-*` の signaling channel と stream だけを操作できる権限を付与します。
 
 ```sh
 cat > /tmp/yrdy-kbd-kvs-webrtc-policy.json <<EOF
@@ -56,9 +57,23 @@ cat > /tmp/yrdy-kbd-kvs-webrtc-policy.json <<EOF
         "kinesisvideo:GetSignalingChannelEndpoint",
         "kinesisvideo:GetIceServerConfig",
         "kinesisvideo:ConnectAsMaster",
-        "kinesisvideo:ConnectAsViewer"
+        "kinesisvideo:ConnectAsViewer",
+        "kinesisvideo:UpdateMediaStorageConfiguration",
+        "kinesisvideo:DescribeMediaStorageConfiguration",
+        "kinesisvideo:JoinStorageSession"
       ],
       "Resource": "arn:aws:kinesisvideo:${AWS_REGION}:${AWS_ACCOUNT_ID}:channel/yrdy-kbd-*/*"
+    },
+    {
+      "Sid": "AllowYrdyKbdKVSStreams",
+      "Effect": "Allow",
+      "Action": [
+        "kinesisvideo:CreateStream",
+        "kinesisvideo:DescribeStream",
+        "kinesisvideo:GetDataEndpoint",
+        "kinesisvideo:GetHLSStreamingSessionURL"
+      ],
+      "Resource": "arn:aws:kinesisvideo:${AWS_REGION}:${AWS_ACCOUNT_ID}:stream/yrdy-kbd-*/*"
     }
   ]
 }
@@ -90,7 +105,33 @@ aws iam attach-user-policy \
   --policy-arn "arn:aws:iam::${AWS_ACCOUNT_ID}:policy/YrdyKbdKVSWebRTCDev"
 ```
 
-このアプリは room 作成時に `CreateSignalingChannel` を呼ぶので、事前に channel を作る必要はありません。
+このアプリはライブ作成時に `CreateSignalingChannel`(録画有効時は `CreateStream` と `UpdateMediaStorageConfiguration` も)を呼ぶので、事前に channel / stream を作る必要はありません。
+
+## 3.5 Cognito user pool を作る(任意)
+
+ローカル開発だけなら省略できます(フロントの `VITE_COGNITO_*` を空にすると dev モードで動きます)。実際に Cognito ログインを使う場合:
+
+```sh
+aws cognito-idp create-user-pool \
+  --profile "$AWS_PROFILE" \
+  --pool-name yrdy-kbd-users \
+  --auto-verified-attributes email \
+  --username-attributes email \
+  --query 'UserPool.Id' --output text
+# => ap-northeast-1_XXXXXXXXX
+
+aws cognito-idp create-user-pool-client \
+  --profile "$AWS_PROFILE" \
+  --user-pool-id ap-northeast-1_XXXXXXXXX \
+  --client-name yrdy-kbd-web \
+  --no-generate-secret \
+  --explicit-auth-flows ALLOW_USER_PASSWORD_AUTH ALLOW_REFRESH_TOKEN_AUTH \
+  --query 'UserPoolClient.ClientId' --output text
+```
+
+取得した pool ID と client ID を `apps/publisher/.env` と `apps/viewer/.env` の `VITE_COGNITO_USER_POOL_ID` / `VITE_COGNITO_CLIENT_ID` に設定します。フロントは `USER_PASSWORD_AUTH` でサインイン/サインアップ/確認コード入力を行います。
+
+本番構成ではトークンの署名・発行元検証を CloudFront + Lambda@Edge で行い、BFF には検証済みリクエストだけが届く前提です。BFF は `Authorization` ヘッダーの JWT ペイロードから `sub` と `cognito:username` を読むだけで、署名検証はしません。
 
 ## 4. BFFを起動する
 
@@ -136,18 +177,29 @@ npm install
 npm run dev -- --port 5174
 ```
 
-ブラウザで `http://localhost:5173` を開き、合言葉を入れて room を作成し、画面共有を開始します。表示された watch link を別タブまたは別端末で開き、同じ合言葉で視聴します。
+ブラウザで `http://localhost:5173` を開いてログインし(dev モードでは任意のユーザー名)、タイトル・合言葉(任意)・公開設定・録画設定を入れてライブを作成し、Go live で画面共有を開始します。`http://localhost:5174` を別タブまたは別端末で開いてログインし、検索または watch link からライブを視聴します。録画付きライブを停止すると "Past broadcasts" に載り、HLS で再生できます。
 
 ## 6. 期待するAWS側の動き
 
-room 作成時:
+ライブ作成時:
 
-1. BFF が `DescribeSignalingChannel` で `yrdy-kbd-{roomId}` の存在確認をします。
+1. BFF が `DescribeSignalingChannel` で `yrdy-kbd-{liveId}` の存在確認をします。
 2. なければ `CreateSignalingChannel` で作成します。
-3. publisher/viewer session 作成時に `GetSignalingChannelEndpoint` と `GetIceServerConfig` を呼びます。
-4. ブラウザの KVS SDK が signaling WSS へ接続するとき、BFF が `ConnectAsMaster` / `ConnectAsViewer` 用に署名済み URL を返します。
+3. 録画有効なら `CreateStream` で stream を作成し、`UpdateMediaStorageConfiguration` で channel に紐付けます。
+4. publisher/viewer session 作成時に `GetSignalingChannelEndpoint` と `GetIceServerConfig` を呼びます。
+5. ブラウザの KVS SDK が signaling WSS へ接続するとき、BFF が `ConnectAsMaster` / `ConnectAsViewer` 用に署名済み URL を返します。
 
-映像データは BFF を経由しません。KVS は signaling、STUN/TURN、接続補助を担当します。
+配信・録画中:
+
+1. publisher の master が signaling に接続すると、BFF が `JoinStorageSession` を呼びます。
+2. KVS が録画ピアとして SDP offer を master に送り、master が応答した映像・音声が stream にアーカイブされます(メディア取り込みは音声トラック必須のため、画面共有に音声がない場合 publisher が無音トラックを追加します)。
+
+再生時:
+
+1. BFF が `GetDataEndpoint` で archived-media エンドポイントを取得します。
+2. `GetHLSStreamingSessionURL` で HLS URL を発行します。配信中は `LIVE`、終了後はライブの開始/終了時刻を範囲にした `ON_DEMAND` です。
+
+映像データは BFF を経由しません。KVS は signaling、STUN/TURN、録画、HLS 配信を担当します。
 
 ## 7. 動作確認コマンド
 
@@ -181,8 +233,14 @@ npm run build
 
 `passphrase does not match`
 
-- publisher が room 作成時に入力した合言葉と viewer の合言葉が違います。
-- room 情報は BFF のメモリ保存なので、BFF を再起動すると既存 room は使えません。
+- ライブ作成時に設定した合言葉と viewer の入力が違います(合言葉なしのライブは誰でも視聴できます)。
+- ライブ情報は `BFF_DATA_FILE`(既定 `apps/bff/data/lives.json`)に永続化されるため、BFF を再起動しても過去の配信は残ります。再起動時に配信中だったライブは `ended` になります。
+
+録画が再生できない
+
+- `Record` を有効にしてライブを作成したか確認してください。
+- KVS のメディア取り込みは H.264 映像 + Opus 音声が必須です。ブラウザが H.264 で送出しているか確認してください。
+- stream の保持時間は `KVS_RETENTION_HOURS`(既定 72 時間)です。それを過ぎた録画は再生できません。
 
 viewer がつながらない
 
@@ -191,7 +249,7 @@ viewer がつながらない
 
 ## 9. 後片付け
 
-このサンプルは signaling channel を自動削除しません。不要になった channel は AWS Console か AWS CLI で削除します。
+このサンプルは signaling channel / stream を自動削除しません。不要になったものは AWS Console か AWS CLI で削除します。
 
 一覧:
 
@@ -211,6 +269,20 @@ aws kinesisvideo delete-signaling-channel \
   --channel-arn "arn:aws:kinesisvideo:${AWS_REGION}:${AWS_ACCOUNT_ID}:channel/yrdy-kbd-xxxxxxxxxxxxxxxx/1234567890123"
 ```
 
+録画用 stream の一覧と削除:
+
+```sh
+aws kinesisvideo list-streams \
+  --profile "$AWS_PROFILE" \
+  --region "$AWS_REGION" \
+  --stream-name-condition ComparisonOperator=BEGINS_WITH,ComparisonValue=yrdy-kbd-
+
+aws kinesisvideo delete-stream \
+  --profile "$AWS_PROFILE" \
+  --region "$AWS_REGION" \
+  --stream-arn "arn:aws:kinesisvideo:${AWS_REGION}:${AWS_ACCOUNT_ID}:stream/yrdy-kbd-xxxxxxxxxxxxxxxx/1234567890123"
+```
+
 ## 参考
 
 - [Amazon Kinesis Video Streams with WebRTC: How it works](https://docs.aws.amazon.com/kinesisvideostreams-webrtc-dg/latest/devguide/kvswebrtc-how-it-works.html)
@@ -219,3 +291,7 @@ aws kinesisvideo delete-signaling-channel \
 - [ConnectAsMaster API](https://docs.aws.amazon.com/kinesisvideostreams-webrtc-dg/latest/devguide/ConnectAsMaster.html)
 - [Kinesis Video Streams IAM actions](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonkinesisvideostreams.html)
 - [Kinesis Video Streams with WebRTC service quotas](https://docs.aws.amazon.com/kinesisvideostreams-webrtc-dg/latest/devguide/kvswebrtc-limits.html)
+- [WebRTC ingestion and storage](https://docs.aws.amazon.com/kinesisvideostreams-webrtc-dg/latest/devguide/webrtc-ingestion.html)
+- [JoinStorageSession API](https://docs.aws.amazon.com/kinesisvideostreams/latest/APIReference/API_webrtc_JoinStorageSession.html)
+- [GetHLSStreamingSessionURL API](https://docs.aws.amazon.com/kinesisvideostreams/latest/APIReference/API_reader_GetHLSStreamingSessionURL.html)
+- [Amazon Cognito user pools](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-identity-pools.html)

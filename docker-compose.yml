@@ -10,6 +10,7 @@ services:
     volumes:
       - ./apps/bff:/app
       - bff_tmp:/app/tmp
+      - bff_data:/app/data
       - ${HOME}/.aws:/root/.aws:ro
 
   publisher:
@@ -38,5 +39,6 @@ services:
 
 volumes:
   bff_tmp:
+  bff_data:
   publisher_node_modules:
   viewer_node_modules:
