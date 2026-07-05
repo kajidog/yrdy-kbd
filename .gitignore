@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+*.local
+
+# Env files (keep .env.example tracked)
+.env
+.env.*
+!.env.example
+
+# Go / Air hot-reload build artifacts
+tmp/
+
+# Local AWS CLI installation (not part of the project)
+/aws/
+/awscliv2.zip
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
