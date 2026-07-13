@@ -1,0 +1,9 @@
+{
+  "name": "@yrdy-kbd/schema",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Shared GraphQL schema (single source of truth for the BFF and the frontends)",
+  "files": [
+    "schema.graphql"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@yrdy-kbd/web-shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Code shared by the publisher and viewer apps: Cognito auth, the GraphQL client, and KVS signaling helpers. Ships TypeScript source; consumers compile it with Vite.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@graphql-typed-document-node/core": "^3.2.0"
+  },
+  "peerDependencies": {
+    "amazon-kinesis-video-streams-webrtc": "^2.8.1",
+    "react": "^19.2.7"
+  }
+}

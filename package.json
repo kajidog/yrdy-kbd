@@ -1,0 +1,15 @@
+{
+  "name": "yrdy-kbd",
+  "private": true,
+  "workspaces": [
+    "apps/publisher",
+    "apps/viewer",
+    "packages/*"
+  ],
+  "scripts": {
+    "codegen": "npm run codegen --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present"
+  }
+}

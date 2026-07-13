@@ -1,0 +1,144 @@
+# Shared GraphQL schema for the yrdy-kbd BFF and frontends.
+#
+# This file is the single source of truth for the API:
+# - apps/bff generates its server code from it with gqlgen (`go tool gqlgen`)
+# - apps/publisher and apps/viewer generate typed clients from it with
+#   GraphQL Code Generator (`npm run codegen`)
+
+"RFC 3339 timestamp, e.g. 2026-07-09T12:34:56Z."
+scalar Time
+
+"Flat string-to-string map, e.g. KVS signaling query parameters."
+scalar StringMap
+
+enum LiveStatus {
+  CREATED
+  LIVE
+  ENDED
+}
+
+enum Role {
+  MASTER
+  VIEWER
+}
+
+enum PlaybackMode {
+  LIVE
+  ON_DEMAND
+}
+
+"The authenticated caller."
+type Me {
+  userId: ID!
+  username: String!
+}
+
+type Live {
+  id: ID!
+  title: String!
+  ownerName: String!
+  public: Boolean!
+  record: Boolean!
+  status: LiveStatus!
+  hasPassphrase: Boolean!
+  "Whether archived media exists (or is being written) for HLS playback."
+  hasRecording: Boolean!
+  "Whether the caller owns this live."
+  owned: Boolean!
+  createdAt: Time!
+  startedAt: Time
+  endedAt: Time
+  "Elapsed broadcast time in seconds; 0 until the broadcast starts."
+  durationSeconds: Int!
+  "Viewer app URL for this live."
+  watchUrl: String!
+}
+
+type EndpointSet {
+  wss: String!
+  https: String!
+}
+
+type IceServer {
+  urls: [String!]!
+  username: String
+  credential: String
+  ttl: Int
+}
+
+"Everything a client needs to open a KVS WebRTC signaling connection."
+type SessionConfig {
+  liveId: ID!
+  role: Role!
+  region: String!
+  channelArn: String!
+  endpoints: EndpointSet!
+  iceServers: [IceServer!]!
+}
+
+type Playback {
+  liveId: ID!
+  hlsUrl: String!
+  playbackMode: PlaybackMode!
+  startedAt: Time
+  endedAt: Time
+  durationSeconds: Int!
+}
+
+type SignedUrl {
+  signedUrl: String!
+}
+
+input CreateLiveInput {
+  title: String!
+  passphrase: String
+  public: Boolean!
+  record: Boolean!
+}
+
+input ViewerSessionInput {
+  liveId: ID!
+  clientId: String!
+  passphrase: String
+}
+
+input PlaybackInput {
+  liveId: ID!
+  passphrase: String
+}
+
+input SignSignalingUrlInput {
+  liveId: ID!
+  role: Role!
+  "Required for VIEWER, forbidden for MASTER."
+  clientId: String
+  passphrase: String
+  "KVS WSS endpoint to sign."
+  endpoint: String!
+  "Query parameters produced by the KVS WebRTC SDK."
+  queryParams: StringMap!
+}
+
+type Query {
+  me: Me!
+  "Public lives that are on air or have a recording, filtered by title or owner name."
+  lives(query: String): [Live!]!
+  "Lives owned by the caller, newest first."
+  myLives: [Live!]!
+  live(id: ID!): Live!
+}
+
+type Mutation {
+  createLive(input: CreateLiveInput!): Live!
+  "Marks the live as ended. Owner only."
+  stopLive(liveId: ID!): Live!
+  "Starts (or resumes) broadcasting. Owner only; marks the live as LIVE."
+  createPublisherSession(liveId: ID!): SessionConfig!
+  createViewerSession(input: ViewerSessionInput!): SessionConfig!
+  "Asks KVS to join the channel as the recording peer. Owner only."
+  joinStorageSession(liveId: ID!): Boolean!
+  "Mints an HLS playback URL for a recorded (or still recording) live."
+  createPlayback(input: PlaybackInput!): Playback!
+  "Signs a KVS signaling WSS URL with the BFF's AWS credentials."
+  signSignalingUrl(input: SignSignalingUrlInput!): SignedUrl!
+}
