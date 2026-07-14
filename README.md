@@ -172,3 +172,14 @@ cd apps/bff && go test ./...
 npm run codegen   # regenerates apps/*/src/gql; diff should be clean
 npm run build     # typechecks and builds publisher and viewer
 ```
+
+## Logging
+
+The BFF emits structured JSON logs to stdout, including HTTP request completion
+events. Publisher and viewer use the Datadog Browser Logs SDK when a client
+token is configured; uncaught errors and GraphQL failures are captured, and
+`request_id` correlates frontend failures with BFF requests.
+
+Datadog is optional for normal development. See
+[`docs/datadog-logging.md`](docs/datadog-logging.md) for environment variables,
+the opt-in Docker Agent profile, and the `mcp-datadog-logs` verification flow.

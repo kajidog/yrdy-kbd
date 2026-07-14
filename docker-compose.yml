@@ -7,6 +7,14 @@ services:
       - ./apps/bff/.env
     environment:
       AWS_PROFILE: ${AWS_PROFILE:-dev}
+      DD_SERVICE: yrdy-kbd-bff
+      DD_ENV: ${DD_ENV:-local}
+      DD_VERSION: ${DD_VERSION:-dev}
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"go","service":"yrdy-kbd-bff"}]'
+      com.datadoghq.tags.service: yrdy-kbd-bff
+      com.datadoghq.tags.env: ${DD_ENV:-local}
+      com.datadoghq.tags.version: ${DD_VERSION:-dev}
     volumes:
       - ./apps/bff:/app
       - bff_tmp:/app/tmp
@@ -41,7 +49,25 @@ services:
     depends_on:
       - bff
 
+  datadog-agent:
+    image: gcr.io/datadoghq/agent:7
+    profiles:
+      - observability
+    environment:
+      DD_API_KEY: ${DD_API_KEY:-}
+      DD_SITE: ${DD_SITE:-datadoghq.com}
+      DD_LOGS_ENABLED: "true"
+      DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL: "false"
+      DD_CONTAINER_EXCLUDE: name:datadog-agent
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /proc:/host/proc:ro
+      - /sys/fs/cgroup:/host/sys/fs/cgroup:ro
+      - datadog_agent_run:/opt/datadog-agent/run
+
 volumes:
   bff_tmp:
   bff_data:
   node_modules:
+  datadog_agent_run:

@@ -228,6 +228,23 @@ func TestRequestsWithoutTokenAreRejected(t *testing.T) {
 		nil, "Authorization bearer token is required")
 }
 
+func TestRequestIDIsReturnedAndCorsExposed(t *testing.T) {
+	handler, _ := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("Origin", "http://viewer.test")
+	req.Header.Set("X-Request-ID", "browser-request-123")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("X-Request-ID"); got != "browser-request-123" {
+		t.Errorf("X-Request-ID = %q, want browser-request-123", got)
+	}
+	if got := rec.Header().Get("Access-Control-Expose-Headers"); got != "X-Request-ID" {
+		t.Errorf("Access-Control-Expose-Headers = %q, want X-Request-ID", got)
+	}
+}
+
 func TestCreateLiveAndPublisherSession(t *testing.T) {
 	handler, fake := newTestServer(t)
 	owner, _ := tokens(t)

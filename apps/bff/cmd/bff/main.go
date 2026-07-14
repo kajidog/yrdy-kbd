@@ -12,6 +12,7 @@ import (
 	"yrdy-kbd/apps/bff/internal/config"
 	"yrdy-kbd/apps/bff/internal/kvs"
 	"yrdy-kbd/apps/bff/internal/live"
+	"yrdy-kbd/apps/bff/internal/logging"
 	"yrdy-kbd/apps/bff/internal/server"
 )
 
@@ -27,6 +28,14 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	logger := logging.New(os.Stdout, logging.Config{
+		Level:       cfg.LogLevel,
+		Service:     cfg.Service,
+		Environment: cfg.Environment,
+		Version:     cfg.Version,
+	})
+	slog.SetDefault(logger)
+	logger.Info("application started", "event_name", "application_started")
 
 	ctx := context.Background()
 	kvsClient, err := kvs.NewAWSClient(ctx, cfg.Region, cfg.RetentionHours)
@@ -47,7 +56,7 @@ func run() error {
 
 	errs := make(chan error, 1)
 	go func() {
-		slog.Info("listening", "addr", cfg.Addr, "region", cfg.Region)
+		logger.Info("server listening", "event_name", "server_listening", "addr", cfg.Addr, "region", cfg.Region)
 		errs <- httpServer.ListenAndServe()
 	}()
 
@@ -61,6 +70,7 @@ func run() error {
 		}
 		return err
 	case <-stop:
+		logger.Info("shutdown requested", "event_name", "shutdown_requested")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		return httpServer.Shutdown(shutdownCtx)

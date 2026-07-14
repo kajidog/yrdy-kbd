@@ -8,6 +8,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@datadog/browser-logs": "^7.5.0",
     "@graphql-typed-document-node/core": "^3.2.0"
   },
   "peerDependencies": {

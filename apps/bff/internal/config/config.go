@@ -13,6 +13,10 @@ type Config struct {
 	ViewerOrigin    string
 	DataFile        string
 	RetentionHours  int32
+	LogLevel        string
+	Service         string
+	Environment     string
+	Version         string
 }
 
 func Load() (Config, error) {
@@ -22,6 +26,10 @@ func Load() (Config, error) {
 		PublisherOrigin: envOrDefault("PUBLISHER_ORIGIN", "http://localhost:5173"),
 		ViewerOrigin:    envOrDefault("VIEWER_ORIGIN", "http://localhost:5174"),
 		DataFile:        envOrDefault("BFF_DATA_FILE", "data/lives.json"),
+		LogLevel:        envOrDefault("LOG_LEVEL", "info"),
+		Service:         envOrDefault("DD_SERVICE", "yrdy-kbd-bff"),
+		Environment:     envOrDefault("DD_ENV", "local"),
+		Version:         envOrDefault("DD_VERSION", "dev"),
 	}
 	if cfg.Region == "" {
 		return Config{}, fmt.Errorf("AWS_REGION is required")
