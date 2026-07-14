@@ -1,4 +1,5 @@
 import {
+  browserLogger,
   createBFFRequestSigner,
   toRTCIceServers,
   type KVSSession,
@@ -54,6 +55,12 @@ export async function startPublisher(options: StartPublisherOptions): Promise<Pu
     enableEarlyIceCandidateBuffering: true,
   }) as PublisherSignalingClient
 
+  browserLogger.info('Publisher WebRTC starting', {
+    event_name: 'publisher_webrtc_starting',
+    channel_arn: options.session.channelArn,
+    local_track_kinds: options.stream.getTracks().map((track) => track.kind),
+  })
+
   function closePeer(clientId: string) {
     const peer = peers.get(clientId)
     if (!peer) {
@@ -62,18 +69,39 @@ export async function startPublisher(options: StartPublisherOptions): Promise<Pu
     peer.connection.close()
     peers.delete(clientId)
     options.onPeerCount(peers.size)
+    browserLogger.info('Publisher peer closed', {
+      event_name: 'publisher_peer_closed',
+      client_id: clientId,
+      peer_count: peers.size,
+    })
   }
 
   signalingClient.on('open', () => {
+    browserLogger.info('Publisher KVS signaling connected', {
+      event_name: 'publisher_signaling_connected',
+      channel_arn: options.session.channelArn,
+    })
     options.onStatus('KVS signaling connected')
     options.onSignalingOpen?.()
   })
 
   signalingClient.on('close', () => {
+    browserLogger.warn('Publisher KVS signaling closed', {
+      event_name: 'publisher_signaling_closed',
+      channel_arn: options.session.channelArn,
+    })
     options.onStatus('KVS signaling closed')
   })
 
   signalingClient.on('error', (error: Error) => {
+    browserLogger.error(
+      'Publisher KVS signaling failed',
+      {
+        event_name: 'publisher_signaling_failed',
+        channel_arn: options.session.channelArn,
+      },
+      error,
+    )
     options.onStatus(error.message)
   })
 
@@ -81,40 +109,83 @@ export async function startPublisher(options: StartPublisherOptions): Promise<Pu
     'sdpOffer',
     async (offer: RTCSessionDescriptionInit, remoteClientId?: string) => {
       if (!remoteClientId) {
+        browserLogger.warn('Publisher received SDP offer without client id', {
+          event_name: 'publisher_sdp_offer_missing_client_id',
+        })
         options.onStatus('Received SDP offer without viewer client id')
         return
       }
 
-      closePeer(remoteClientId)
-      const connection = new RTCPeerConnection(rtcConfig)
-      peers.set(remoteClientId, { connection })
-      options.onPeerCount(peers.size)
-
-      for (const track of options.stream.getTracks()) {
-        connection.addTrack(track, options.stream)
-      }
-
-      connection.addEventListener('icecandidate', ({ candidate }) => {
-        if (candidate) {
-          signalingClient.sendIceCandidate(candidate, remoteClientId)
-        }
+      browserLogger.info('Publisher received SDP offer', {
+        event_name: 'publisher_sdp_offer_received',
+        client_id: remoteClientId,
       })
+      try {
+        closePeer(remoteClientId)
+        const connection = new RTCPeerConnection(rtcConfig)
+        peers.set(remoteClientId, { connection })
+        options.onPeerCount(peers.size)
 
-      connection.addEventListener('connectionstatechange', () => {
-        const state = connection.connectionState
-        options.onStatus(`Viewer ${remoteClientId}: ${state}`)
-        if (state === 'failed' || state === 'disconnected' || state === 'closed') {
-          closePeer(remoteClientId)
+        for (const track of options.stream.getTracks()) {
+          connection.addTrack(track, options.stream)
         }
-      })
 
-      await connection.setRemoteDescription(offer)
-      signalingClient.drainPendingIceCandidates(remoteClientId)
+        connection.addEventListener('icecandidate', ({ candidate }) => {
+          if (candidate) {
+            signalingClient.sendIceCandidate(candidate, remoteClientId)
+          } else {
+            browserLogger.debug('Publisher ICE gathering completed', {
+              event_name: 'publisher_ice_gathering_completed',
+              client_id: remoteClientId,
+            })
+          }
+        })
 
-      const answer = await connection.createAnswer()
-      await connection.setLocalDescription(answer)
-      if (connection.localDescription) {
-        signalingClient.sendSdpAnswer(connection.localDescription, remoteClientId)
+        connection.addEventListener('iceconnectionstatechange', () => {
+          browserLogger.info('Publisher ICE connection state changed', {
+            event_name: 'publisher_ice_state_changed',
+            client_id: remoteClientId,
+            ice_connection_state: connection.iceConnectionState,
+          })
+        })
+
+        connection.addEventListener('connectionstatechange', () => {
+          const state = connection.connectionState
+          browserLogger.info('Publisher peer connection state changed', {
+            event_name: 'publisher_peer_state_changed',
+            client_id: remoteClientId,
+            connection_state: state,
+          })
+          options.onStatus(`Viewer ${remoteClientId}: ${state}`)
+          if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+            closePeer(remoteClientId)
+          }
+        })
+
+        await connection.setRemoteDescription(offer)
+        signalingClient.drainPendingIceCandidates(remoteClientId)
+
+        const answer = await connection.createAnswer()
+        await connection.setLocalDescription(answer)
+        if (connection.localDescription) {
+          signalingClient.sendSdpAnswer(connection.localDescription, remoteClientId)
+          browserLogger.info('Publisher sent SDP answer', {
+            event_name: 'publisher_sdp_answer_sent',
+            client_id: remoteClientId,
+          })
+        }
+      } catch (caught) {
+        const error = caught instanceof Error ? caught : new Error(String(caught))
+        browserLogger.error(
+          'Publisher failed to handle SDP offer',
+          {
+            event_name: 'publisher_sdp_offer_failed',
+            client_id: remoteClientId,
+          },
+          error,
+        )
+        options.onStatus(`Viewer ${remoteClientId}: ${error.message}`)
+        closePeer(remoteClientId)
       }
     },
   )
@@ -127,9 +198,25 @@ export async function startPublisher(options: StartPublisherOptions): Promise<Pu
       }
       const peer = peers.get(remoteClientId)
       if (!peer) {
+        browserLogger.warn('Publisher received ICE candidate for unknown peer', {
+          event_name: 'publisher_ice_candidate_unknown_peer',
+          client_id: remoteClientId,
+        })
         return
       }
-      await peer.connection.addIceCandidate(candidate)
+      try {
+        await peer.connection.addIceCandidate(candidate)
+      } catch (caught) {
+        const error = caught instanceof Error ? caught : new Error(String(caught))
+        browserLogger.error(
+          'Publisher failed to add ICE candidate',
+          {
+            event_name: 'publisher_ice_candidate_failed',
+            client_id: remoteClientId,
+          },
+          error,
+        )
+      }
     },
   )
 
@@ -137,6 +224,11 @@ export async function startPublisher(options: StartPublisherOptions): Promise<Pu
 
   return {
     stop() {
+      browserLogger.info('Publisher WebRTC stopping', {
+        event_name: 'publisher_webrtc_stopping',
+        channel_arn: options.session.channelArn,
+        peer_count: peers.size,
+      })
       signalingClient.close()
       for (const peer of peers.values()) {
         peer.connection.close()

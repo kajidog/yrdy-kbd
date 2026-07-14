@@ -1,4 +1,5 @@
 import Hls from 'hls.js'
+import { browserLogger } from '@yrdy-kbd/web-shared'
 import {
   Clock,
   Gauge,
@@ -16,6 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 type HlsPlayerProps = {
   src: string
+  liveId: string
   title: string
   // Wall-clock time at position 0 of the media, used for the clock display
   // and seekbar tooltips.
@@ -31,7 +33,7 @@ type BufferedRange = {
 
 const playbackRates = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
-export function HlsPlayer({ src, title, startedAt, live = false, onError }: HlsPlayerProps) {
+export function HlsPlayer({ src, liveId, title, startedAt, live = false, onError }: HlsPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const seekBarRef = useRef<HTMLDivElement>(null)
@@ -71,24 +73,57 @@ export function HlsPlayer({ src, title, startedAt, live = false, onError }: HlsP
     let hls: Hls | null = null
     if (Hls.isSupported()) {
       hls = new Hls({ enableWorker: true })
+      browserLogger.info('HLS player loading source', {
+        event_name: 'hls_source_loading',
+        live_id: liveId,
+        playback_type: live ? 'live' : 'recording',
+      })
       hls.loadSource(src)
       hls.attachMedia(video)
+      hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
+        browserLogger.info('HLS manifest loaded', {
+          event_name: 'hls_manifest_loaded',
+          live_id: liveId,
+          playback_type: live ? 'live' : 'recording',
+          level_count: data.levels.length,
+        })
+      })
       hls.on(Hls.Events.ERROR, (_event, data) => {
+        const context = {
+          event_name: 'hls_playback_error',
+          live_id: liveId,
+          playback_type: live ? 'live' : 'recording',
+          fatal: data.fatal,
+          error_type: data.type,
+          error_details: data.details,
+        }
         if (data.fatal) {
+          browserLogger.error('HLS playback failed', context)
           onError?.(`HLS playback error: ${data.details}`)
           hls?.destroy()
+        } else {
+          browserLogger.warn('HLS playback warning', context)
         }
       })
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      browserLogger.info('Native HLS player loading source', {
+        event_name: 'hls_source_loading',
+        live_id: liveId,
+        playback_type: live ? 'live' : 'recording',
+      })
       video.src = src
     } else {
+      browserLogger.error('HLS playback is unsupported', {
+        event_name: 'hls_playback_unsupported',
+        live_id: liveId,
+      })
       onError?.('This browser cannot play HLS streams')
     }
 
     return () => {
       hls?.destroy()
     }
-  }, [src, onError])
+  }, [src, liveId, live, onError])
 
   useEffect(() => {
     const video = videoRef.current
@@ -122,7 +157,14 @@ export function HlsPlayer({ src, title, startedAt, live = false, onError }: HlsP
       setCurrentTime(video.currentTime)
       readDuration()
     }
-    const onPlay = () => setPlaying(true)
+    const onPlay = () => {
+      setPlaying(true)
+      browserLogger.info('Media playback started', {
+        event_name: 'media_playback_started',
+        live_id: liveId,
+        playback_type: live ? 'live' : 'recording',
+      })
+    }
     const onPause = () => setPlaying(false)
     const onVolume = () => {
       setVolume(video.volume)
@@ -148,7 +190,7 @@ export function HlsPlayer({ src, title, startedAt, live = false, onError }: HlsP
       video.removeEventListener('volumechange', onVolume)
       video.removeEventListener('ratechange', onRate)
     }
-  }, [])
+  }, [liveId, live])
 
   useEffect(() => {
     const onFullscreenChange = () => setFullscreen(Boolean(document.fullscreenElement))

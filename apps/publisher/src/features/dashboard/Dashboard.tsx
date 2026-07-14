@@ -1,4 +1,4 @@
-import { errorMessage, type AuthSession } from '@yrdy-kbd/web-shared'
+import { browserLogger, errorMessage, type AuthSession } from '@yrdy-kbd/web-shared'
 import { LogOut } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -64,6 +64,12 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
   }, [releaseBroadcast])
 
   async function handleCreated(live: LiveSummary) {
+    browserLogger.info('Live created', {
+      event_name: 'live_created',
+      live_id: live.id,
+      recording_enabled: live.record,
+      visibility: live.public ? 'public' : 'private',
+    })
     setSelectedId(live.id)
     setStatusText('Live is ready to broadcast')
     await refreshLives()
@@ -75,6 +81,12 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
     }
     const live = selected
 
+    browserLogger.info('Broadcast start requested', {
+      event_name: 'broadcast_start_requested',
+      live_id: live.id,
+      recording_enabled: live.record,
+    })
+
     setError('')
     setStatus('starting')
     setStatusText('Waiting for screen selection')
@@ -84,10 +96,20 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
         video: true,
         audio: true,
       })
+      browserLogger.info('Display capture granted', {
+        event_name: 'display_capture_granted',
+        live_id: live.id,
+        video_track_count: stream.getVideoTracks().length,
+        audio_track_count: stream.getAudioTracks().length,
+      })
       if (live.record && stream.getAudioTracks().length === 0) {
         const silent = createSilentAudioTrack()
         silentAudioRef.current = silent
         stream.addTrack(silent.track)
+        browserLogger.info('Silent recording audio track added', {
+          event_name: 'silent_audio_track_added',
+          live_id: live.id,
+        })
       }
       streamRef.current = stream
       if (videoRef.current) {
@@ -104,21 +126,61 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
         stream,
         onStatus: setStatusText,
         onPeerCount: setPeerCount,
-        onSignalingOpen: live.record
-          ? () => {
-              setStatusText('Starting recording session')
-              joinStorageSession(live.id)
-                .then(() => setStatusText('Recording to Kinesis Video Streams'))
-                .catch((caught) => setError(`Recording failed: ${errorMessage(caught)}`))
-            }
-          : undefined,
+        onSignalingOpen: () => {
+          browserLogger.info('Broadcast connected', {
+            event_name: 'broadcast_connected',
+            live_id: live.id,
+            recording_enabled: live.record,
+          })
+          if (live.record) {
+            browserLogger.info('Recording session start requested', {
+              event_name: 'recording_session_start_requested',
+              live_id: live.id,
+            })
+            setStatusText('Starting recording session')
+            joinStorageSession(live.id)
+              .then(() => {
+                browserLogger.info('Recording session started', {
+                  event_name: 'recording_session_started',
+                  live_id: live.id,
+                })
+                setStatusText('Recording to Kinesis Video Streams')
+              })
+              .catch((caught) => {
+                const caughtError = caught instanceof Error ? caught : new Error(String(caught))
+                browserLogger.error(
+                  'Recording session failed',
+                  {
+                    event_name: 'recording_session_failed',
+                    live_id: live.id,
+                  },
+                  caughtError,
+                )
+                setError(`Recording failed: ${errorMessage(caught)}`)
+              })
+          }
+        },
       })
       runtimeRef.current = runtime
       broadcastingIdRef.current = live.id
       setStatus('live')
       setStatusText('Broadcasting screen')
+      browserLogger.info('Broadcast started', {
+        event_name: 'broadcast_started',
+        live_id: live.id,
+        recording_enabled: live.record,
+      })
       await refreshLives()
     } catch (caught) {
+      const caughtError = caught instanceof Error ? caught : new Error(String(caught))
+      browserLogger.error(
+        'Broadcast start failed',
+        {
+          event_name: 'broadcast_start_failed',
+          live_id: live.id,
+        },
+        caughtError,
+      )
       releaseBroadcast()
       setStatus('error')
       setError(errorMessage(caught))
@@ -128,6 +190,13 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
 
   async function handleStopBroadcast() {
     const liveId = broadcastingIdRef.current
+    if (liveId) {
+      browserLogger.info('Broadcast stop requested', {
+        event_name: 'broadcast_stop_requested',
+        live_id: liveId,
+        peer_count: peerCount,
+      })
+    }
     broadcastingIdRef.current = ''
     releaseBroadcast()
     setPeerCount(0)
@@ -136,7 +205,20 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
     if (liveId) {
       try {
         await stopLive(liveId)
+        browserLogger.info('Broadcast stopped', {
+          event_name: 'broadcast_stopped',
+          live_id: liveId,
+        })
       } catch (caught) {
+        const caughtError = caught instanceof Error ? caught : new Error(String(caught))
+        browserLogger.error(
+          'Broadcast stop failed',
+          {
+            event_name: 'broadcast_stop_failed',
+            live_id: liveId,
+          },
+          caughtError,
+        )
         setError(errorMessage(caught))
       }
       await refreshLives()

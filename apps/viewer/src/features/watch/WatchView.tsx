@@ -1,4 +1,4 @@
-import { errorMessage, formatDate, formatDuration } from '@yrdy-kbd/web-shared'
+import { browserLogger, errorMessage, formatDate, formatDuration } from '@yrdy-kbd/web-shared'
 import { ArrowLeft, KeyRound, MonitorPlay, Square, Unplug } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { HlsPlayer } from '../../components/HlsPlayer'
@@ -32,14 +32,23 @@ export function WatchView({ liveId, onBack }: { liveId: string; onBack: () => vo
   const [error, setError] = useState('')
   const videoRef = useRef<HTMLVideoElement>(null)
   const runtimeRef = useRef<ViewerRuntime | null>(null)
+  const connectedLiveIDRef = useRef('')
 
   const releaseViewer = useCallback(() => {
+    if (connectedLiveIDRef.current) {
+      browserLogger.info('Live viewer left', {
+        event_name: 'live_viewer_left',
+        live_id: connectedLiveIDRef.current,
+        client_id: clientId,
+      })
+      connectedLiveIDRef.current = ''
+    }
     runtimeRef.current?.stop()
     runtimeRef.current = null
     if (videoRef.current) {
       videoRef.current.srcObject = null
     }
-  }, [])
+  }, [clientId])
 
   useEffect(() => {
     return () => {
@@ -51,6 +60,11 @@ export function WatchView({ liveId, onBack }: { liveId: string; onBack: () => vo
     async (target: LiveSummary, enteredPassphrase: string) => {
       setError('')
       if (target.status === 'LIVE') {
+        browserLogger.info('Live viewer join requested', {
+          event_name: 'live_viewer_join_requested',
+          live_id: target.id,
+          client_id: clientId,
+        })
         setState('connecting')
         setStatusText('Preparing viewer session')
         try {
@@ -72,6 +86,13 @@ export function WatchView({ liveId, onBack }: { liveId: string; onBack: () => vo
                 queryParams,
               }),
             onRemoteStream(stream) {
+              connectedLiveIDRef.current = target.id
+              browserLogger.info('Live viewer connected', {
+                event_name: 'live_viewer_connected',
+                live_id: target.id,
+                client_id: clientId,
+                remote_track_kinds: stream.getTracks().map((track) => track.kind),
+              })
               if (videoRef.current) {
                 videoRef.current.srcObject = stream
               }
@@ -82,11 +103,25 @@ export function WatchView({ liveId, onBack }: { liveId: string; onBack: () => vo
           })
           runtimeRef.current = runtime
         } catch (caught) {
+          const caughtError = caught instanceof Error ? caught : new Error(String(caught))
+          browserLogger.error(
+            'Live viewer join failed',
+            {
+              event_name: 'live_viewer_join_failed',
+              live_id: target.id,
+              client_id: clientId,
+            },
+            caughtError,
+          )
           releaseViewer()
           setState(target.hasPassphrase && !target.owned ? 'locked' : 'error')
           setError(errorMessage(caught))
         }
       } else if (target.hasRecording) {
+        browserLogger.info('Recording playback requested', {
+          event_name: 'recording_playback_requested',
+          live_id: target.id,
+        })
         setState('connecting')
         setStatusText('Fetching HLS playback URL')
         try {
@@ -97,7 +132,21 @@ export function WatchView({ liveId, onBack }: { liveId: string; onBack: () => vo
           setPlayback(info)
           setState('watching-recording')
           setStatusText('Playing recording over HLS')
+          browserLogger.info('Recording playback URL acquired', {
+            event_name: 'recording_playback_url_acquired',
+            live_id: target.id,
+            playback_mode: info.playbackMode,
+          })
         } catch (caught) {
+          const caughtError = caught instanceof Error ? caught : new Error(String(caught))
+          browserLogger.error(
+            'Recording playback request failed',
+            {
+              event_name: 'recording_playback_request_failed',
+              live_id: target.id,
+            },
+            caughtError,
+          )
           setState(target.hasPassphrase && !target.owned ? 'locked' : 'error')
           setError(errorMessage(caught))
         }
@@ -217,6 +266,7 @@ export function WatchView({ liveId, onBack }: { liveId: string; onBack: () => vo
       {state === 'watching-recording' && playback && live ? (
         <HlsPlayer
           src={playback.hlsUrl}
+          liveId={live.id}
           title={live.title}
           startedAt={playback.startedAt ?? undefined}
           live={playback.playbackMode === 'LIVE'}

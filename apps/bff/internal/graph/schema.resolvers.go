@@ -81,6 +81,12 @@ func (r *mutationResolver) CreateLive(ctx context.Context, input model.CreateLiv
 		slog.Error("persist live", "liveID", entry.ID, "error", err)
 		return nil, fmt.Errorf("persist live")
 	}
+	slog.Info("live created",
+		"event_name", "live_created",
+		"live_id", entry.ID,
+		"recording_enabled", entry.Record,
+		"visibility", map[bool]string{true: "public", false: "private"}[entry.Public],
+	)
 
 	return r.toLive(entry, user.ID), nil
 }
@@ -111,6 +117,7 @@ func (r *mutationResolver) StopLive(ctx context.Context, liveID string) (*model.
 		slog.Error("mark live ended", "liveID", liveID, "error", err)
 		return nil, fmt.Errorf("update live state")
 	}
+	slog.Info("broadcast stopped", "event_name", "broadcast_stopped", "live_id", entry.ID)
 	return r.toLive(entry, user.ID), nil
 }
 
@@ -151,6 +158,11 @@ func (r *mutationResolver) CreatePublisherSession(ctx context.Context, liveID st
 		slog.Error("mark live started", "liveID", entry.ID, "error", err)
 		return nil, fmt.Errorf("update live state")
 	}
+	slog.Info("publisher session created",
+		"event_name", "broadcast_started",
+		"live_id", entry.ID,
+		"recording_enabled", entry.Record,
+	)
 
 	return toSessionConfig(entry.ID, session), nil
 }
@@ -184,6 +196,11 @@ func (r *mutationResolver) CreateViewerSession(ctx context.Context, input model.
 		slog.Error("create viewer session", "liveID", entry.ID, "clientID", input.ClientID, "error", err)
 		return nil, fmt.Errorf("create KVS viewer session")
 	}
+	slog.Info("viewer session created",
+		"event_name", "live_viewer_session_created",
+		"live_id", entry.ID,
+		"client_id", input.ClientID,
+	)
 
 	return toSessionConfig(entry.ID, session), nil
 }
@@ -205,10 +222,12 @@ func (r *mutationResolver) JoinStorageSession(ctx context.Context, liveID string
 		return false, fmt.Errorf("recording is not enabled for this live")
 	}
 
+	slog.Info("joining storage session", "event_name", "recording_session_start_requested", "live_id", entry.ID)
 	if err := r.KVS.JoinStorageSession(ctx, entry.ChannelARN); err != nil {
 		slog.Error("join storage session", "liveID", entry.ID, "error", err)
 		return false, fmt.Errorf("start KVS recording session")
 	}
+	slog.Info("storage session joined", "event_name", "recording_session_started", "live_id", entry.ID)
 	return true, nil
 }
 
@@ -244,6 +263,11 @@ func (r *mutationResolver) CreatePlayback(ctx context.Context, input model.Playb
 		slog.Error("create HLS playback URL", "liveID", entry.ID, "error", err)
 		return nil, fmt.Errorf("create HLS playback URL")
 	}
+	slog.Info("HLS playback URL created",
+		"event_name", "recording_playback_requested",
+		"live_id", entry.ID,
+		"playback_mode", map[bool]string{true: "live", false: "on_demand"}[isLive],
+	)
 
 	mode := model.PlaybackModeOnDemand
 	if isLive {

@@ -10,8 +10,8 @@ export type BrowserLoggerConfig = {
 
 let initialized = false
 
-// initializeBrowserLogger is intentionally a no-op without a client token so
-// every developer can run the app without Datadog credentials.
+// Datadog export is optional. Browser console logging remains available when
+// there is no client token so local WebRTC failures are still diagnosable.
 export function initializeBrowserLogger(config: BrowserLoggerConfig): boolean {
   if (initialized || !config.clientToken) {
     return initialized
@@ -32,11 +32,39 @@ export function initializeBrowserLogger(config: BrowserLoggerConfig): boolean {
   return true
 }
 
-function log(message: string, context: Context | undefined, status: 'debug' | 'info' | 'warn' | 'error', error?: Error) {
-  if (!initialized) {
-    return
+function logToConsole(
+  message: string,
+  context: Context | undefined,
+  status: 'debug' | 'info' | 'warn' | 'error',
+  error?: Error,
+) {
+  const details = context ? { ...context, ...(error ? { error } : {}) } : error
+  const args = details ? [`[yrdy-kbd] ${message}`, details] : [`[yrdy-kbd] ${message}`]
+  switch (status) {
+    case 'debug':
+      console.debug(...args)
+      break
+    case 'warn':
+      console.warn(...args)
+      break
+    case 'error':
+      console.error(...args)
+      break
+    default:
+      console.info(...args)
   }
-  datadogLogs.logger.log(message, context, status, error)
+}
+
+function log(
+  message: string,
+  context: Context | undefined,
+  status: 'debug' | 'info' | 'warn' | 'error',
+  error?: Error,
+) {
+  logToConsole(message, context, status, error)
+  if (initialized) {
+    datadogLogs.logger.log(message, context, status, error)
+  }
 }
 
 export const browserLogger = {
