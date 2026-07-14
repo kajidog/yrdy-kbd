@@ -18,9 +18,28 @@ type WatchState =
   | 'locked'
   | 'connecting'
   | 'watching-live'
-  | 'watching-recording'
+  | 'watching-hls'
   | 'unavailable'
   | 'error'
+
+// Right after a recording-enabled broadcast starts, the storage session may
+// not have written any fragment yet and minting a LIVE HLS URL fails until it
+// does. Retry briefly before surfacing the error to the viewer.
+async function getPlaybackWithRetry(
+  input: { liveId: string; passphrase?: string },
+  attempts: number,
+): Promise<PlaybackInfo> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await getPlayback(input)
+    } catch (caught) {
+      if (attempt >= attempts || !errorMessage(caught).includes('HLS')) {
+        throw caught
+      }
+      await new Promise((resolve) => setTimeout(resolve, 3000))
+    }
+  }
+}
 
 export function WatchView({ liveId, onBack }: { liveId: string; onBack: () => void }) {
   const clientId = useMemo(() => createClientId(), [])
@@ -33,8 +52,12 @@ export function WatchView({ liveId, onBack }: { liveId: string; onBack: () => vo
   const videoRef = useRef<HTMLVideoElement>(null)
   const runtimeRef = useRef<ViewerRuntime | null>(null)
   const connectedLiveIDRef = useRef('')
+  // Incremented whenever a watch attempt starts or the viewer is released,
+  // so slow async work (HLS URL retries) from a stale attempt is discarded.
+  const watchAttemptRef = useRef(0)
 
   const releaseViewer = useCallback(() => {
+    watchAttemptRef.current += 1
     if (connectedLiveIDRef.current) {
       browserLogger.info('Live viewer left', {
         event_name: 'live_viewer_left',
@@ -59,7 +82,11 @@ export function WatchView({ liveId, onBack }: { liveId: string; onBack: () => vo
   const startWatching = useCallback(
     async (target: LiveSummary, enteredPassphrase: string) => {
       setError('')
-      if (target.status === 'LIVE') {
+      const attempt = ++watchAttemptRef.current
+      // Recording-enabled lives run in KVS media-ingestion mode, where
+      // master↔viewer P2P is not available; they are watched over HLS from
+      // the ingested stream instead, both during and after the broadcast.
+      if (target.status === 'LIVE' && !target.record) {
         browserLogger.info('Live viewer join requested', {
           event_name: 'live_viewer_join_requested',
           live_id: target.id,
@@ -117,30 +144,41 @@ export function WatchView({ liveId, onBack }: { liveId: string; onBack: () => vo
           setState(target.hasPassphrase && !target.owned ? 'locked' : 'error')
           setError(errorMessage(caught))
         }
-      } else if (target.hasRecording) {
-        browserLogger.info('Recording playback requested', {
+      } else if (target.status === 'LIVE' || target.hasRecording) {
+        const isLiveHls = target.status === 'LIVE'
+        browserLogger.info('HLS playback requested', {
           event_name: 'recording_playback_requested',
           live_id: target.id,
+          playback_type: isLiveHls ? 'live' : 'recording',
         })
         setState('connecting')
-        setStatusText('Fetching HLS playback URL')
+        setStatusText(isLiveHls ? 'Fetching live HLS URL' : 'Fetching HLS playback URL')
         try {
-          const info = await getPlayback({
-            liveId: target.id,
-            passphrase: enteredPassphrase || undefined,
-          })
+          const info = await getPlaybackWithRetry(
+            {
+              liveId: target.id,
+              passphrase: enteredPassphrase || undefined,
+            },
+            isLiveHls ? 5 : 1,
+          )
+          if (watchAttemptRef.current !== attempt) {
+            return
+          }
           setPlayback(info)
-          setState('watching-recording')
-          setStatusText('Playing recording over HLS')
-          browserLogger.info('Recording playback URL acquired', {
+          setState('watching-hls')
+          setStatusText(isLiveHls ? 'Playing live over HLS' : 'Playing recording over HLS')
+          browserLogger.info('HLS playback URL acquired', {
             event_name: 'recording_playback_url_acquired',
             live_id: target.id,
             playback_mode: info.playbackMode,
           })
         } catch (caught) {
+          if (watchAttemptRef.current !== attempt) {
+            return
+          }
           const caughtError = caught instanceof Error ? caught : new Error(String(caught))
           browserLogger.error(
-            'Recording playback request failed',
+            'HLS playback request failed',
             {
               event_name: 'recording_playback_request_failed',
               live_id: target.id,
@@ -263,7 +301,7 @@ export function WatchView({ liveId, onBack }: { liveId: string; onBack: () => vo
         </form>
       )}
 
-      {state === 'watching-recording' && playback && live ? (
+      {state === 'watching-hls' && playback && live ? (
         <HlsPlayer
           src={playback.hlsUrl}
           liveId={live.id}

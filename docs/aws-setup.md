@@ -60,7 +60,8 @@ cat > /tmp/yrdy-kbd-kvs-webrtc-policy.json <<EOF
         "kinesisvideo:ConnectAsViewer",
         "kinesisvideo:UpdateMediaStorageConfiguration",
         "kinesisvideo:DescribeMediaStorageConfiguration",
-        "kinesisvideo:JoinStorageSession"
+        "kinesisvideo:JoinStorageSession",
+        "kinesisvideo:JoinStorageSessionAsViewer"
       ],
       "Resource": "arn:aws:kinesisvideo:${AWS_REGION}:${AWS_ACCOUNT_ID}:channel/yrdy-kbd-*/*"
     },
@@ -192,7 +193,9 @@ npm run dev -- --port 5174
 配信・録画中:
 
 1. publisher の master が signaling に接続すると、BFF が `JoinStorageSession` を呼びます。
-2. KVS が録画ピアとして SDP offer を master に送り、master が応答した映像・音声が stream にアーカイブされます(メディア取り込みは音声トラック必須のため、画面共有に音声がない場合 publisher が無音トラックを追加します)。
+2. KVS が録画ピアとして client ID なしの SDP offer を master に送り、master は client ID なしで SDP answer と ICE candidate を返します。
+3. viewer は `JoinStorageSessionAsViewer` を呼び、ストレージセッションからの SDP offer に応答して、master ではなくストレージセッションからライブ映像を受信します。
+4. master が応答した映像・音声が stream にアーカイブされます(メディア取り込みは音声トラック必須のため、画面共有に音声がない場合 publisher が無音トラックを追加します)。
 
 再生時:
 

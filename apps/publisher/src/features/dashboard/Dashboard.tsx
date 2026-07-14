@@ -9,7 +9,12 @@ import {
   stopLive,
   type LiveSummary,
 } from '../../graphql/operations'
-import { createSilentAudioTrack, startPublisher, type PublisherRuntime } from '../../lib/kvsPublisher'
+import {
+  createConstantFrameRateVideoTrack,
+  createSilentAudioTrack,
+  startPublisher,
+  type PublisherRuntime,
+} from '../../lib/kvsPublisher'
 import { BroadcastPanel } from '../broadcast/BroadcastPanel'
 import { CreateLivePanel } from '../lives/CreateLivePanel'
 import { MyLivesPanel } from '../lives/MyLivesPanel'
@@ -29,7 +34,9 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
   const streamRef = useRef<MediaStream | null>(null)
   const runtimeRef = useRef<PublisherRuntime | null>(null)
   const silentAudioRef = useRef<{ stop: () => void } | null>(null)
+  const cfrVideoRef = useRef<{ stop: () => void } | null>(null)
   const broadcastingIdRef = useRef('')
+  const storageRejoinsRef = useRef(0)
 
   const selected = lives.find((live) => live.id === selectedId) ?? null
 
@@ -50,6 +57,8 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
     runtimeRef.current = null
     silentAudioRef.current?.stop()
     silentAudioRef.current = null
+    cfrVideoRef.current?.stop()
+    cfrVideoRef.current = null
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
     if (videoRef.current) {
@@ -90,6 +99,7 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
     setError('')
     setStatus('starting')
     setStatusText('Waiting for screen selection')
+    storageRejoinsRef.current = 0
 
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -117,13 +127,30 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
       }
       stream.getVideoTracks()[0]?.addEventListener('ended', () => void handleStopBroadcast())
 
+      // Screen captures stop producing frames while the content is static,
+      // which stalls KVS media ingestion. Recording-enabled lives publish a
+      // constant-frame-rate canvas copy of the capture instead.
+      let publishStream = stream
+      if (live.record) {
+        const videoTrack = stream.getVideoTracks()[0]
+        if (videoTrack) {
+          const cfr = createConstantFrameRateVideoTrack(videoTrack)
+          cfrVideoRef.current = cfr
+          publishStream = new MediaStream([cfr.track, ...stream.getAudioTracks()])
+          browserLogger.info('Constant frame rate video track added', {
+            event_name: 'constant_frame_rate_track_added',
+            live_id: live.id,
+          })
+        }
+      }
+
       setStatusText('Preparing KVS session')
       const sessionConfig = await createPublisherSession(live.id)
       const runtime = await startPublisher({
         session: sessionConfig,
         signUrl: async (endpoint, queryParams) =>
           signSignalingUrl({ liveId: live.id, role: 'MASTER', endpoint, queryParams }),
-        stream,
+        stream: publishStream,
         onStatus: setStatusText,
         onPeerCount: setPeerCount,
         onSignalingOpen: () => {
@@ -159,6 +186,43 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
                 setError(`Recording failed: ${errorMessage(caught)}`)
               })
           }
+        },
+        onStoragePeerClosed: () => {
+          // The storage session dropped while broadcasting; rejoin so the
+          // recording resumes (KVS sends a fresh SDP offer after rejoining).
+          if (!live.record || broadcastingIdRef.current !== live.id) {
+            return
+          }
+          if (storageRejoinsRef.current >= 5) {
+            setError('Recording session lost and could not be re-established')
+            return
+          }
+          storageRejoinsRef.current += 1
+          const attempt = storageRejoinsRef.current
+          browserLogger.warn('Recording session lost; rejoining', {
+            event_name: 'recording_session_rejoin_requested',
+            live_id: live.id,
+            attempt,
+          })
+          setStatusText('Reconnecting recording session')
+          window.setTimeout(() => {
+            if (broadcastingIdRef.current !== live.id) {
+              return
+            }
+            joinStorageSession(live.id).catch((caught) => {
+              const caughtError = caught instanceof Error ? caught : new Error(String(caught))
+              browserLogger.error(
+                'Recording session rejoin failed',
+                {
+                  event_name: 'recording_session_rejoin_failed',
+                  live_id: live.id,
+                  attempt,
+                },
+                caughtError,
+              )
+              setError(`Recording reconnect failed: ${errorMessage(caught)}`)
+            })
+          }, 2000)
         },
       })
       runtimeRef.current = runtime
