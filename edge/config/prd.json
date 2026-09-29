@@ -1,0 +1,9 @@
+{
+  "userPoolId": "REPLACE_ME",
+  "clientIds": {
+    "mobi": "REPLACE_ME",
+    "pc": "REPLACE_ME",
+    "cli-api": "REPLACE_ME"
+  },
+  "corsOrigins": []
+}

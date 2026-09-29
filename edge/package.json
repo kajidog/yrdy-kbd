@@ -1,0 +1,21 @@
+{
+  "name": "edge-auth",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "node build.mjs",
+    "test": "vitest run",
+    "ci": "npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.164",
+    "@types/node": "^26.6.3",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  },
+  "dependencies": {
+    "aws-jwt-verify": "^5.2.1"
+  }
+}
