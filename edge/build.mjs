@@ -4,7 +4,9 @@ import { build } from "esbuild";
 import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, statSync } from "node:fs";
 
-const stage = process.env.STAGE ?? "dev";
+// 既定値は持たない。本番ビルドで STAGE が抜けて dev の設定が埋め込まれるのを防ぐ
+const stage = process.env.STAGE;
+if (!stage) throw new Error("STAGE is required (e.g. STAGE=dev npm run build)");
 const stageConfig = JSON.parse(readFileSync(`config/${stage}.json`, "utf8"));
 
 const handlers = ["mobi", "pc", "cli-api"];

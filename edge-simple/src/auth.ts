@@ -18,6 +18,9 @@ export const createAuthHandler = (clientId: string): CloudFrontRequestHandler =>
 
   return async (event) => {
     const request = event.Records[0].cf.request;
+    // CORS プリフライトはトークンを持たないので素通しする（オリジン側で CORS 応答させる）
+    if (request.method === "OPTIONS") return request;
+
     const token = request.headers.authorization?.[0]?.value.replace(/^Bearer /i, "");
     if (!token) return unauthorized;
 

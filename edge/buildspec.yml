@@ -3,7 +3,7 @@ version: 0.2
 # CodePipeline のソースはリポジトリルートなので、各コマンドは edge/ で実行する。
 # 0.2 では cd が後続コマンドに引き継がれるため、毎回絶対パスで移動する。
 # CodeBuild プロジェクト側で buildspec のパスに edge/buildspec.yml を指定し、
-# 環境変数 STAGE（dev / prd）を渡す想定。
+# 環境変数 STAGE（dev / prd）を必ず渡す（未設定ならビルドが失敗する）。
 phases:
   install:
     runtime-versions:
@@ -16,7 +16,7 @@ phases:
       - cd "$CODEBUILD_SRC_DIR/edge" && npm test
   build:
     commands:
-      - cd "$CODEBUILD_SRC_DIR/edge" && STAGE=${STAGE:-dev} npm run build
+      - cd "$CODEBUILD_SRC_DIR/edge" && npm run build
 
 artifacts:
   base-directory: edge/dist
