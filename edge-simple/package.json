@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "prebuild": "if grep -q '\"REPLACE_ME\"' src/config.ts; then echo 'src/config.ts の REPLACE_ME を実際の値に置き換えてください' >&2; exit 1; fi",
     "build": "esbuild src/handlers/*.ts --bundle --minify --platform=node --target=node22 --format=esm --outdir=dist --entry-names=[name]/index --out-extension:.js=.mjs"
   },
   "devDependencies": {

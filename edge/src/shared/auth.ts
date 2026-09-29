@@ -86,6 +86,11 @@ export const createAuthHandler = (
       return deny();
     }
 
+    // スキームの大文字小文字を問わず受け付けるので、オリジンには正規形で渡す
+    // （オリジン側が "Bearer " を大文字小文字区別で解析しても通るように）
+    const key = request.headers[header]?.[0]?.key ?? header;
+    request.headers[header] = [{ key, value: `Bearer ${token}` }];
+
     onAuthorized?.(request, claims);
     return request;
   };

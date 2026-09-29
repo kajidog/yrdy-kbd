@@ -23,6 +23,8 @@ export const createAuthHandler = (clientId: string): CloudFrontRequestHandler =>
 
     try {
       await verifier.verify(token);
+      // オリジンには "Bearer " の正規形で渡す（bearer / BEARER でも受け付けるため）
+      request.headers.authorization = [{ key: "Authorization", value: `Bearer ${token}` }];
       return request;
     } catch {
       return unauthorized;

@@ -91,4 +91,11 @@ describe("createAuthHandler", () => {
     expect(other.status).toBe("401");
     expect(other.headers["access-control-allow-origin"]).toBeUndefined();
   });
+
+  it("小文字の bearer でも通し、オリジンには Bearer に正規化して渡す", async () => {
+    const token = issueToken();
+    const headers = { authorization: [{ key: "Authorization", value: `bearer ${token}` }] };
+    const res = (await handler(event({ headers }))) as CloudFrontRequest;
+    expect(res.headers.authorization[0].value).toBe(`Bearer ${token}`);
+  });
 });
