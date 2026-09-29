@@ -13,7 +13,7 @@ src/
   handlers/
     mobi.ts / pc.ts / cli-api.ts
 config/
-  dev.json / prd.json   # userPoolId と ハンドラーごとの clientId
+  dev.json / prd.json   # userPoolId / ハンドラーごとの clientId / corsOrigins（REPLACE_ME を実値に置き換える）
 test/                   # ローカル鍵で発行したJWTで検証ロジックをテスト
 build.mjs               # esbuild で dist/<name>/index.mjs と dist/<name>.zip を生成
 buildspec.yml           # CodeBuild 用
@@ -39,3 +39,6 @@ STAGE=dev npm run build   # → dist/mobi.zip, dist/pc.zip, dist/cli-api.zip
 - Lambda@Edge は環境変数不可 → 設定はビルド時に `define` で埋め込む。ステージごとに別ビルド。
 - ランタイムは Node.js 22（`.mjs` / ESM）。関数は us-east-1 に作成。
 - 1MB（viewer-request）を超えたら build.mjs が失敗する。
+- config に `REPLACE_ME` が残っている、または userPoolId の形式が不正ならビルドが失敗する。
+- ブラウザから呼ぶ場合は `corsOrigins` にフロントのオリジンを入れる（Edge が返す 401 にも CORS ヘッダーが付く）。
+- CodeBuild はリポジトリルートで動くので、プロジェクトの buildspec パスに `edge/buildspec.yml` を指定する。

@@ -3,6 +3,8 @@
 export type EdgeConfig = {
   userPoolId: string;
   clientId: string;
+  /** Edge が返す 401 に CORS ヘッダーを付けるオリジン */
+  corsOrigins: string[];
 };
 
 declare const __EDGE_CONFIG__: EdgeConfig;

@@ -20,6 +20,11 @@ export type AuthHandlerOptions = {
   publicPaths?: (string | RegExp)[];
   /** CORS プリフライト (OPTIONS) を素通しするか。既定: true */
   allowPreflight?: boolean;
+  /**
+   * ブラウザから呼ばれる場合に、Edge が返す 401 にも CORS ヘッダーを付ける許可オリジン。
+   * 付けないとブラウザが CORS エラー扱いにし、クライアントが 401 を判別できない。
+   */
+  corsOrigins?: string[];
   /** 検証成功後にリクエストを加工する（オリジンにユーザー情報を渡す等） */
   onAuthorized?: (request: CloudFrontRequest, claims: Claims) => void;
 };
@@ -33,7 +38,22 @@ const extractBearer = (value: string | undefined) => {
 };
 
 const isPublic = (uri: string, paths: (string | RegExp)[]) =>
-  paths.some((p) => (typeof p === "string" ? uri === p : p.test(uri)));
+  paths.some((p) => {
+    if (typeof p === "string") return uri === p;
+    // g / y フラグ付きの正規表現は lastIndex を保持するため、
+    // ウォームコンテナで結果が交互に変わらないよう毎回リセットする
+    p.lastIndex = 0;
+    return p.test(uri);
+  });
+
+const corsHeaders = (headers: CloudFrontHeaders, allowed: string[]): CloudFrontHeaders => {
+  const origin = getHeader(headers, "origin");
+  if (!origin || !allowed.includes(origin)) return {};
+  return {
+    "access-control-allow-origin": [{ key: "Access-Control-Allow-Origin", value: origin }],
+    vary: [{ key: "Vary", value: "Origin" }],
+  };
+};
 
 export const createAuthHandler = (
   verifier: TokenVerifier,
@@ -43,6 +63,7 @@ export const createAuthHandler = (
     header = "authorization",
     publicPaths = [],
     allowPreflight = true,
+    corsOrigins = [],
     onAuthorized,
   } = options;
 
@@ -52,15 +73,17 @@ export const createAuthHandler = (
     if (allowPreflight && request.method === "OPTIONS") return request;
     if (isPublic(request.uri, publicPaths)) return request;
 
+    const deny = () => unauthorized(corsHeaders(request.headers, corsOrigins));
+
     const token = extractBearer(getHeader(request.headers, header));
-    if (!token) return unauthorized();
+    if (!token) return deny();
 
     let claims: Claims;
     try {
       claims = await verifier.verify(token);
     } catch (e) {
       console.warn("token verification failed", (e as Error).message);
-      return unauthorized();
+      return deny();
     }
 
     onAuthorized?.(request, claims);

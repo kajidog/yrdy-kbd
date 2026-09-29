@@ -8,13 +8,27 @@ const stage = process.env.STAGE ?? "dev";
 const stageConfig = JSON.parse(readFileSync(`config/${stage}.json`, "utf8"));
 
 const handlers = ["mobi", "pc", "cli-api"];
+
+// プレースホルダーや形式違いのままパッケージしないよう、ビルド前に検証する
+const USER_POOL_ID = /^[a-z]{2}(-[a-z]+)+-\d_[0-9A-Za-z]+$/;
+const errors = [];
+if (!USER_POOL_ID.test(stageConfig.userPoolId ?? "")) {
+  errors.push(`userPoolId is invalid: ${JSON.stringify(stageConfig.userPoolId)}`);
+}
+for (const name of handlers) {
+  const id = stageConfig.clientIds?.[name];
+  if (!id || id === "REPLACE_ME") errors.push(`clientIds.${name} is not set`);
+}
+if (errors.length) {
+  throw new Error(`config/${stage}.json:\n  - ${errors.join("\n  - ")}`);
+}
 const VIEWER_LIMIT = 1024 * 1024; // viewer-request トリガーの zip 上限 1MB
 
 rmSync("dist", { recursive: true, force: true });
 
 for (const name of handlers) {
   const clientId = stageConfig.clientIds[name];
-  if (!clientId) throw new Error(`clientIds.${name} is missing in config/${stage}.json`);
+  const corsOrigins = stageConfig.corsOrigins ?? [];
 
   await build({
     entryPoints: [`src/handlers/${name}.ts`],
@@ -27,7 +41,7 @@ for (const name of handlers) {
     format: "esm",
     external: ["@aws-sdk/*"], // ランタイム同梱
     define: {
-      __EDGE_CONFIG__: JSON.stringify({ userPoolId: stageConfig.userPoolId, clientId }),
+      __EDGE_CONFIG__: JSON.stringify({ userPoolId: stageConfig.userPoolId, clientId, corsOrigins }),
     },
     logLevel: "warning",
   });

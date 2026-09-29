@@ -71,4 +71,24 @@ describe("createAuthHandler", () => {
     expect(await handler(event({ uri: "/health" }))).toMatchObject({ uri: "/health" });
     expect(await handler(event({ method: "OPTIONS" }))).toMatchObject({ method: "OPTIONS" });
   });
+
+  it("g フラグ付き正規表現の publicPaths でも毎回通す", async () => {
+    const h = createAuthHandler(verifier, { publicPaths: [/^\/public/g] });
+    for (let i = 0; i < 3; i++) {
+      expect(await h(event({ uri: "/public/a" }))).toMatchObject({ uri: "/public/a" });
+    }
+  });
+
+  it("許可オリジンからのリクエストには 401 にも CORS ヘッダーを付ける", async () => {
+    const h = createAuthHandler(verifier, { corsOrigins: ["https://app.example.com"] });
+    const origin = (value: string) => ({ origin: [{ key: "Origin", value }] });
+
+    const allowed = (await h(event({ headers: origin("https://app.example.com") }))) as { status: string; headers: Record<string, { value: string }[]> };
+    expect(allowed.status).toBe("401");
+    expect(allowed.headers["access-control-allow-origin"][0].value).toBe("https://app.example.com");
+
+    const other = (await h(event({ headers: origin("https://evil.example.com") }))) as { status: string; headers: Record<string, unknown> };
+    expect(other.status).toBe("401");
+    expect(other.headers["access-control-allow-origin"]).toBeUndefined();
+  });
 });

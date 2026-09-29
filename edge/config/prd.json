@@ -1,8 +1,9 @@
 {
-  "userPoolId": "ap-northeast-1_YYYYYYYYY",
+  "userPoolId": "REPLACE_ME",
   "clientIds": {
-    "mobi": "mobi-app-client-id-prd",
-    "pc": "pc-app-client-id-prd",
-    "cli-api": "cli-app-client-id-prd"
-  }
+    "mobi": "REPLACE_ME",
+    "pc": "REPLACE_ME",
+    "cli-api": "REPLACE_ME"
+  },
+  "corsOrigins": []
 }
