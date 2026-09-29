@@ -1,0 +1,21 @@
+version: 0.2
+
+# CodePipeline から STAGE を環境変数で渡す想定（dev / prd）
+phases:
+  install:
+    runtime-versions:
+      nodejs: 22
+    commands:
+      - npm ci
+  pre_build:
+    commands:
+      - npm run typecheck
+      - npm test
+  build:
+    commands:
+      - STAGE=${STAGE:-dev} npm run build
+
+artifacts:
+  base-directory: dist
+  files:
+    - "*.zip"

@@ -1,0 +1,76 @@
+import type {
+  CloudFrontHeaders,
+  CloudFrontRequest,
+  CloudFrontRequestEvent,
+  CloudFrontRequestResult,
+} from "aws-lambda";
+import { unauthorized } from "./response";
+
+export type Claims = Record<string, unknown> & { sub: string };
+
+/** aws-jwt-verify の verifier と互換。テストで差し替えられるように最小限の型にしている */
+export type TokenVerifier = {
+  verify(token: string): Promise<Claims>;
+};
+
+export type AuthHandlerOptions = {
+  /** トークンを読むヘッダー名（小文字）。既定: authorization */
+  header?: string;
+  /** 認証をスキップするパス（ヘルスチェック等） */
+  publicPaths?: (string | RegExp)[];
+  /** CORS プリフライト (OPTIONS) を素通しするか。既定: true */
+  allowPreflight?: boolean;
+  /** 検証成功後にリクエストを加工する（オリジンにユーザー情報を渡す等） */
+  onAuthorized?: (request: CloudFrontRequest, claims: Claims) => void;
+};
+
+const getHeader = (headers: CloudFrontHeaders, name: string) =>
+  headers[name]?.[0]?.value;
+
+const extractBearer = (value: string | undefined) => {
+  const m = value?.match(/^Bearer\s+(.+)$/i);
+  return m?.[1];
+};
+
+const isPublic = (uri: string, paths: (string | RegExp)[]) =>
+  paths.some((p) => (typeof p === "string" ? uri === p : p.test(uri)));
+
+export const createAuthHandler = (
+  verifier: TokenVerifier,
+  options: AuthHandlerOptions = {},
+) => {
+  const {
+    header = "authorization",
+    publicPaths = [],
+    allowPreflight = true,
+    onAuthorized,
+  } = options;
+
+  return async (event: CloudFrontRequestEvent): Promise<CloudFrontRequestResult> => {
+    const request = event.Records[0].cf.request;
+
+    if (allowPreflight && request.method === "OPTIONS") return request;
+    if (isPublic(request.uri, publicPaths)) return request;
+
+    const token = extractBearer(getHeader(request.headers, header));
+    if (!token) return unauthorized();
+
+    let claims: Claims;
+    try {
+      claims = await verifier.verify(token);
+    } catch (e) {
+      console.warn("token verification failed", (e as Error).message);
+      return unauthorized();
+    }
+
+    onAuthorized?.(request, claims);
+    return request;
+  };
+};
+
+/** よく使う onAuthorized: sub をオリジン向けヘッダーに載せる */
+export const forwardSub =
+  (name = "x-user-sub") =>
+  (request: CloudFrontRequest, claims: Claims) => {
+    request.headers[name] = [{ key: name, value: claims.sub }];
+  };

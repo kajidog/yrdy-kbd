@@ -1,0 +1,8 @@
+{
+  "userPoolId": "ap-northeast-1_YYYYYYYYY",
+  "clientIds": {
+    "mobi": "mobi-app-client-id-prd",
+    "pc": "pc-app-client-id-prd",
+    "cli-api": "cli-app-client-id-prd"
+  }
+}
