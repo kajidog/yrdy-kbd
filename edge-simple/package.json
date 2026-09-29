@@ -1,0 +1,17 @@
+{
+  "name": "edge-auth-simple",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "esbuild src/handlers/*.ts --bundle --minify --platform=node --target=node22 --format=esm --outdir=dist --entry-names=[name]/index --out-extension:.js=.mjs"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.164",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "aws-jwt-verify": "^5.2.1"
+  }
+}

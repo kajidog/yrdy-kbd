@@ -1,0 +1,18 @@
+version: 0.2
+
+# CodeBuild はリポジトリルートで動くので、毎回 edge-simple/ に移動して実行する
+phases:
+  install:
+    runtime-versions:
+      nodejs: 22
+    commands:
+      - cd "$CODEBUILD_SRC_DIR/edge-simple" && npm ci
+  build:
+    commands:
+      - cd "$CODEBUILD_SRC_DIR/edge-simple" && npm run typecheck
+      - cd "$CODEBUILD_SRC_DIR/edge-simple" && npm run build
+
+artifacts:
+  base-directory: edge-simple/dist
+  files:
+    - "**/*"
