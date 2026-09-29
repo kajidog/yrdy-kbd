@@ -97,8 +97,19 @@ export const createAuthHandler = (
 };
 
 /** よく使う onAuthorized: sub をオリジン向けヘッダーに載せる */
-export const forwardSub =
-  (name = "x-user-sub") =>
+export const forwardSub = (name = "x-user-sub") => forwardClaims({ sub: name });
+
+/**
+ * クレームをオリジン向けヘッダーに載せる。複数の IdP を受け付ける場合、sub は IdP 間で
+ * 一意とは限らないので iss も渡し、オリジン側は (iss, sub) の組でユーザーを識別する。
+ * クライアントが同名ヘッダーを送ってきても、ここで必ず上書き（クレームがなければ削除）する。
+ */
+export const forwardClaims =
+  (mapping: Record<string, string> = { sub: "x-user-sub", iss: "x-user-iss" }) =>
   (request: CloudFrontRequest, claims: Claims) => {
-    request.headers[name] = [{ key: name, value: claims.sub }];
+    for (const [claim, name] of Object.entries(mapping)) {
+      const value = claims[claim];
+      if (typeof value === "string") request.headers[name] = [{ key: name, value }];
+      else delete request.headers[name];
+    }
   };

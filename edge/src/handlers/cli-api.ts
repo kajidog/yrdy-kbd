@@ -1,6 +1,7 @@
 import { createAuthHandler } from "../shared/auth";
-import { createIdTokenVerifier } from "../shared/verifier";
+import { config } from "../shared/config";
+import { createVerifier } from "../shared/verifier";
 
-export const handler = createAuthHandler(createIdTokenVerifier(), {
+export const handler = createAuthHandler(createVerifier(config.accept), {
   allowPreflight: false,
 });

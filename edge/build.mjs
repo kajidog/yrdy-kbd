@@ -2,25 +2,21 @@
 // 出力: dist/<name>/index.mjs と dist/<name>.zip（Lambda@Edge にそのままデプロイできる形）
 import { build } from "esbuild";
 import { execFileSync } from "node:child_process";
-import { readFileSync, rmSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { resolveConfig } from "./resolve-config.mjs";
 
 // 既定値は持たない。本番ビルドで STAGE が抜けて dev の設定が埋め込まれるのを防ぐ
 const stage = process.env.STAGE;
 if (!stage) throw new Error("STAGE is required (e.g. STAGE=dev npm run build)");
 const stageConfig = JSON.parse(readFileSync(`config/${stage}.json`, "utf8"));
 
-const handlers = ["mobi", "pc", "cli-api"];
+// src/handlers/*.ts がそのままハンドラー一覧（config の handlers と 1:1 で対応させる）
+const handlers = readdirSync("src/handlers")
+  .filter((f) => f.endsWith(".ts"))
+  .map((f) => f.slice(0, -3));
 
 // プレースホルダーや形式違いのままパッケージしないよう、ビルド前に検証する
-const USER_POOL_ID = /^[a-z]{2}(-[a-z]+)+-\d_[0-9A-Za-z]+$/;
-const errors = [];
-if (!USER_POOL_ID.test(stageConfig.userPoolId ?? "")) {
-  errors.push(`userPoolId is invalid: ${JSON.stringify(stageConfig.userPoolId)}`);
-}
-for (const name of handlers) {
-  const id = stageConfig.clientIds?.[name];
-  if (!id || id === "REPLACE_ME") errors.push(`clientIds.${name} is not set`);
-}
+const { errors, handlers: handlerConfigs } = resolveConfig(stageConfig, handlers);
 if (errors.length) {
   throw new Error(`config/${stage}.json:\n  - ${errors.join("\n  - ")}`);
 }
@@ -29,9 +25,6 @@ const VIEWER_LIMIT = 1024 * 1024; // viewer-request トリガーの zip 上限 1
 rmSync("dist", { recursive: true, force: true });
 
 for (const name of handlers) {
-  const clientId = stageConfig.clientIds[name];
-  const corsOrigins = stageConfig.corsOrigins ?? [];
-
   await build({
     entryPoints: [`src/handlers/${name}.ts`],
     outfile: `dist/${name}/index.mjs`,
@@ -43,7 +36,7 @@ for (const name of handlers) {
     format: "esm",
     external: ["@aws-sdk/*"], // ランタイム同梱
     define: {
-      __EDGE_CONFIG__: JSON.stringify({ userPoolId: stageConfig.userPoolId, clientId, corsOrigins }),
+      __EDGE_CONFIG__: JSON.stringify(handlerConfigs[name]),
     },
     logLevel: "warning",
   });
@@ -51,5 +44,6 @@ for (const name of handlers) {
   execFileSync("zip", ["-qj", `dist/${name}.zip`, `dist/${name}/index.mjs`]);
   const size = statSync(`dist/${name}.zip`).size;
   if (size > VIEWER_LIMIT) throw new Error(`${name}.zip is ${size} bytes (> 1MB)`);
-  console.log(`[${stage}] ${name}: dist/${name}.zip (${(size / 1024).toFixed(1)} KB)`);
+  const accepts = handlerConfigs[name].accept.map((r) => r.name).join(", ");
+  console.log(`[${stage}] ${name}: dist/${name}.zip (${(size / 1024).toFixed(1)} KB) accept=[${accepts}]`);
 }
