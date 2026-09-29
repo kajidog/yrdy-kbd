@@ -1,8 +1,8 @@
-import { createAuthHandler, forwardSub } from "../shared/auth";
+import { createAuthHandler, forwardClaims } from "../shared/auth";
 import { config } from "../shared/config";
-import { createIdTokenVerifier } from "../shared/verifier";
+import { createVerifier } from "../shared/verifier";
 
-export const handler = createAuthHandler(createIdTokenVerifier(), {
+export const handler = createAuthHandler(createVerifier(config.accept), {
   corsOrigins: config.corsOrigins,
-  onAuthorized: forwardSub(),
+  onAuthorized: forwardClaims(),
 });

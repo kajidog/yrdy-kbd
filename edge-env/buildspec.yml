@@ -1,0 +1,30 @@
+version: 0.2
+
+# 環境ごとの CodeBuild プロジェクトで、EDGE_* の環境変数にその環境の値を設定する
+# （プロジェクトの環境変数、または下の env.parameter-store で SSM から読む）。
+# ソースで参照している EDGE_* が 1 つでも未設定ならビルドが失敗する。
+# CodeBuild はリポジトリルートで動くので、buildspec のパスに edge-env/buildspec.yml を指定する。
+# 0.2 では cd が後続コマンドに引き継がれるため、毎回絶対パスで移動する。
+#
+# env:
+#   parameter-store:
+#     EDGE_COGNITO_USER_POOL_ID: /edge/dev/cognito-user-pool-id
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 22
+    commands:
+      - cd "$CODEBUILD_SRC_DIR/edge-env" && npm ci
+  pre_build:
+    commands:
+      - cd "$CODEBUILD_SRC_DIR/edge-env" && npm run typecheck
+      - cd "$CODEBUILD_SRC_DIR/edge-env" && npm test
+  build:
+    commands:
+      - cd "$CODEBUILD_SRC_DIR/edge-env" && npm run build
+
+artifacts:
+  base-directory: edge-env/dist
+  files:
+    - "*.zip"
