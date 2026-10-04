@@ -3,7 +3,7 @@ import type { Jwks } from "aws-jwt-verify/jwk";
 import { decomposeUnverifiedJwt } from "aws-jwt-verify/jwt";
 import type { JwtPayload } from "aws-jwt-verify/jwt-model";
 import type { Claims } from "./auth";
-import type { AcceptRule } from "./config";
+import type { AcceptRule } from "./providers";
 
 type SingleVerifier = {
   verify(token: string): Promise<unknown>;
@@ -53,7 +53,13 @@ const createSingle = (rule: AcceptRule): SingleVerifier => {
  * JWKS はインスタンス内にキャッシュされ、コンテナ再利用時は再取得されない。
  */
 export const createVerifier = (accept: AcceptRule[]) => {
-  const byIssuer = new Map(accept.map((rule) => [rule.issuer, createSingle(rule)]));
+  if (accept.length === 0) throw new Error("accept is empty");
+  const byIssuer = new Map<string, SingleVerifier>();
+  for (const rule of accept) {
+    // iss でルールを引くので、同じ issuer が 2 つあるとどちらを使うか決まらない
+    if (byIssuer.has(rule.issuer)) throw new Error(`duplicate issuer: ${rule.issuer}`);
+    byIssuer.set(rule.issuer, createSingle(rule));
+  }
 
   return {
     async verify(token: string): Promise<Claims> {

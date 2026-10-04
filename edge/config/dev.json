@@ -1,9 +1,17 @@
 {
-  "userPoolId": "REPLACE_ME",
-  "clientIds": {
-    "mobi": "REPLACE_ME",
-    "pc": "REPLACE_ME",
-    "cli-api": "REPLACE_ME"
+  "providers": {
+    "cognito": { "type": "cognito", "userPoolId": "REPLACE_ME" }
+  },
+  "handlers": {
+    "mobi": {
+      "accept": { "cognito": { "clientId": "REPLACE_ME", "tokenUse": "id" } }
+    },
+    "pc": {
+      "accept": { "cognito": { "clientId": "REPLACE_ME", "tokenUse": "id" } }
+    },
+    "cli-api": {
+      "accept": { "cognito": { "clientId": "REPLACE_ME", "tokenUse": "id" } }
+    }
   },
   "corsOrigins": []
 }
