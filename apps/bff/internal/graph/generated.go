@@ -31,6 +31,7 @@ type Config = graphql.Config[ResolverRoot, DirectiveRoot, ComplexityRoot]
 type ResolverRoot interface {
 	Mutation() MutationResolver
 	Query() QueryResolver
+	Subscription() SubscriptionResolver
 }
 
 type DirectiveRoot struct {
@@ -109,6 +110,10 @@ type ComplexityRoot struct {
 	SignedUrl struct {
 		SignedURL func(childComplexity int) int
 	}
+
+	Subscription struct {
+		MyLives func(childComplexity int) int
+	}
 }
 
 // endregion ***************************** api!.gotpl *****************************
@@ -129,6 +134,9 @@ type QueryResolver interface {
 	Lives(ctx context.Context, query *string) ([]*model.Live, error)
 	MyLives(ctx context.Context) ([]*model.Live, error)
 	Live(ctx context.Context, id string) (*model.Live, error)
+}
+type SubscriptionResolver interface {
+	MyLives(ctx context.Context) (<-chan []*model.Live, error)
 }
 
 // endregion ************************** generated!.gotpl **************************
@@ -479,6 +487,13 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.SignedUrl.SignedURL(childComplexity), true
 
+	case "Subscription.myLives":
+		if e.ComplexityRoot.Subscription.MyLives == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Subscription.MyLives(childComplexity), true
+
 	}
 	return 0, false
 }
@@ -534,6 +549,23 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 			ctx = graphql.WithUnmarshalerMap(ctx, inputUnmarshalMap)
 			data := ec._Mutation(ctx, opCtx.Operation.SelectionSet)
 			var buf bytes.Buffer
+			data.MarshalGQL(&buf)
+
+			return &graphql.Response{
+				Data: buf.Bytes(),
+			}
+		}
+	case ast.Subscription:
+		next := ec._Subscription(ctx, opCtx.Operation.SelectionSet)
+
+		var buf bytes.Buffer
+		return func(ctx context.Context) *graphql.Response {
+			buf.Reset()
+			data := next(ctx)
+
+			if data == nil {
+				return nil
+			}
 			data.MarshalGQL(&buf)
 
 			return &graphql.Response{
@@ -709,6 +741,15 @@ type Mutation {
   createPlayback(input: PlaybackInput!): Playback!
   "Signs a KVS signaling WSS URL with the BFF's AWS credentials."
   signSignalingUrl(input: SignSignalingUrlInput!): SignedUrl!
+}
+
+type Subscription {
+  """
+  Same payload as Query.myLives, delivered over SSE (graphql-sse distinct
+  connections mode). The BFF re-reads the live store on an interval and pushes
+  the full list every time, whether or not it changed.
+  """
+  myLives: [Live!]!
 }
 `, BuiltIn: false},
 }
@@ -2503,6 +2544,38 @@ func (ec *executionContext) _SignedUrl_signedUrl(ctx context.Context, field grap
 }
 func (ec *executionContext) fieldContext_SignedUrl_signedUrl(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("SignedUrl", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Subscription_myLives(ctx context.Context, field graphql.CollectedField) (ret func(ctx context.Context) graphql.Marshaler) {
+	return graphql.ResolveFieldStream(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Subscription_myLives(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Subscription().MyLives(ctx)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []*model.Live) graphql.Marshaler {
+			return ec.marshalNLive2ᚕᚖyrdyᚑkbdᚋappsᚋbffᚋinternalᚋgraphᚋmodelᚐLiveᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Subscription_myLives(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Subscription",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_Live(ctx, field)
+		},
+	}
+	return fc, nil
 }
 
 func (ec *executionContext) ___Directive_name(ctx context.Context, field graphql.CollectedField, obj *introspection.Directive) (ret graphql.Marshaler) {
@@ -4406,6 +4479,26 @@ func (ec *executionContext) _SignedUrl(ctx context.Context, sel ast.SelectionSet
 	})
 
 	return out
+}
+
+var subscriptionImplementors = []string{"Subscription"}
+
+func (ec *executionContext) _Subscription(ctx context.Context, sel ast.SelectionSet) func(ctx context.Context) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, subscriptionImplementors)
+	ctx = graphql.WithFieldContext(ctx, &graphql.FieldContext{
+		Object: "Subscription",
+	})
+	if len(fields) != 1 {
+		graphql.AddErrorf(ctx, "must subscribe to exactly one stream")
+		return nil
+	}
+
+	switch fields[0].Name {
+	case "myLives":
+		return ec._Subscription_myLives(ctx, fields[0])
+	default:
+		panic("unknown field " + strconv.Quote(fields[0].Name))
+	}
 }
 
 var __DirectiveImplementors = []string{"__Directive"}

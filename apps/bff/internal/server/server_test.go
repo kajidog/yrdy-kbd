@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"yrdy-kbd/apps/bff/internal/config"
 	"yrdy-kbd/apps/bff/internal/graph/model"
@@ -568,5 +570,124 @@ func TestStopRequiresOwner(t *testing.T) {
 	}
 	if stopped.EndedAt == nil {
 		t.Fatal("expected endedAt to be set")
+	}
+}
+
+// sseEvents opens a graphql-sse (distinct connections mode) subscription and
+// returns a channel of decoded "next" payloads.
+func sseEvents(t *testing.T, serverURL, token, query string) <-chan gqlResponse {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"query": query})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, serverURL+"/graphql", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("open SSE stream: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if got := resp.Header.Get("Content-Type"); got != "text/event-stream" {
+		t.Fatalf("Content-Type = %q, want text/event-stream", got)
+	}
+
+	events := make(chan gqlResponse)
+	go func() {
+		defer close(events)
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		event := ""
+		for scanner.Scan() {
+			line := scanner.Text()
+			switch {
+			case strings.HasPrefix(line, "event: "):
+				event = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "data: ") && event == "next":
+				var decoded gqlResponse
+				if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &decoded); err != nil {
+					return
+				}
+				select {
+				case events <- decoded:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return events
+}
+
+func nextMyLives(t *testing.T, events <-chan gqlResponse) []model.Live {
+	t.Helper()
+	select {
+	case resp, ok := <-events:
+		if !ok {
+			t.Fatal("SSE stream closed")
+		}
+		if len(resp.Errors) > 0 {
+			t.Fatalf("unexpected GraphQL errors: %+v", resp.Errors)
+		}
+		var lives []model.Live
+		if err := json.Unmarshal(resp.Data["myLives"], &lives); err != nil {
+			t.Fatalf("decode myLives: %v", err)
+		}
+		return lives
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for an SSE event")
+		return nil
+	}
+}
+
+func TestMyLivesSubscriptionPushesFullListOverSSE(t *testing.T) {
+	handler, _ := newTestServer(t)
+	server := httptest.NewServer(handler)
+	// Cleanup (not defer) so the SSE stream is closed first; Close waits for it.
+	t.Cleanup(server.Close)
+	owner, viewer := tokens(t)
+
+	created := createTestLive(t, handler, owner, map[string]any{"title": "subscribed", "public": true, "record": false})
+	createTestLive(t, handler, viewer, map[string]any{"title": "someone else's", "public": true, "record": false})
+
+	events := sseEvents(t, server.URL, owner, `subscription { myLives {`+liveFields+`} }`)
+
+	// The current state arrives right away.
+	first := nextMyLives(t, events)
+	if len(first) != 1 || first[0].ID != created.ID || first[0].Status != model.LiveStatusCreated {
+		t.Fatalf("first event = %+v, want only %s in CREATED", first, created.ID)
+	}
+
+	// Changes made through mutations show up in a later full snapshot.
+	startPublisherSession(t, handler, owner, created.ID)
+	for {
+		lives := nextMyLives(t, events)
+		if len(lives) == 1 && lives[0].Status == model.LiveStatusLive {
+			break
+		}
+	}
+}
+
+func TestMyLivesSubscriptionRequiresToken(t *testing.T) {
+	handler, _ := newTestServer(t)
+	server := httptest.NewServer(handler)
+	// Cleanup (not defer) so the SSE stream is closed first; Close waits for it.
+	t.Cleanup(server.Close)
+
+	events := sseEvents(t, server.URL, "", `subscription { myLives { id } }`)
+	select {
+	case resp := <-events:
+		if len(resp.Errors) == 0 || !strings.Contains(resp.Errors[0].Message, "Authorization bearer token is required") {
+			t.Fatalf("errors = %+v, want missing token error", resp.Errors)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for an SSE event")
 	}
 }

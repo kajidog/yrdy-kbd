@@ -197,6 +197,16 @@ export type SignedUrl = {
   signedUrl: Scalars['String']['output'];
 };
 
+export type Subscription = {
+  __typename?: 'Subscription';
+  /**
+   * Same payload as Query.myLives, delivered over SSE (graphql-sse distinct
+   * connections mode). The BFF re-reads the live store on an interval and pushes
+   * the full list every time, whether or not it changed.
+   */
+  myLives: Array<Live>;
+};
+
 export type ViewerSessionInput = {
   clientId: Scalars['String']['input'];
   liveId: Scalars['ID']['input'];
