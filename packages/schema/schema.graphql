@@ -142,3 +142,12 @@ type Mutation {
   "Signs a KVS signaling WSS URL with the BFF's AWS credentials."
   signSignalingUrl(input: SignSignalingUrlInput!): SignedUrl!
 }
+
+type Subscription {
+  """
+  Same payload as Query.myLives, delivered over SSE (graphql-sse distinct
+  connections mode). The BFF re-reads the live store on an interval and pushes
+  the full list every time, whether or not it changed.
+  """
+  myLives: [Live!]!
+}

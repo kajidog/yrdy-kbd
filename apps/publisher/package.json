@@ -12,6 +12,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@apollo/client": "^3.14.1",
     "@yrdy-kbd/web-shared": "*",
     "amazon-kinesis-video-streams-webrtc": "^2.8.1",
     "events": "^3.3.0",

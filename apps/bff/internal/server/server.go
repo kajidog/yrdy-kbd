@@ -29,6 +29,10 @@ func New(cfg config.Config, kvsClient kvs.Client, lives *live.Store) http.Handle
 		Resolvers: &graph.Resolver{Cfg: cfg, KVS: kvsClient, LiveStore: lives},
 	}))
 	gql.AddTransport(transport.Options{})
+	// SSE must come before POST: both accept JSON POSTs, and SSE claims the
+	// ones sent with "Accept: text/event-stream" (graphql-sse distinct
+	// connections mode), which is how subscriptions are delivered.
+	gql.AddTransport(transport.SSE{KeepAlivePingInterval: 15 * time.Second})
 	gql.AddTransport(transport.POST{})
 	gql.SetQueryCache(lru.New[*ast.QueryDocument](1000))
 	gql.Use(extension.Introspection{})
@@ -86,6 +90,17 @@ func (w *statusWriter) Write(body []byte) (int, error) {
 	written, err := w.ResponseWriter.Write(body)
 	w.bytesWritten += written
 	return written, err
+}
+
+// Flush lets streaming responses (SSE subscriptions) through the logging
+// wrapper; gqlgen's SSE transport requires an http.Flusher.
+func (w *statusWriter) Flush() {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }

@@ -54,18 +54,14 @@ export async function createLive(input: CreateLiveInput): Promise<LiveSummary> {
   return data.createLive
 }
 
-const MyLives = graphql(`
-  query MyLives {
+// Used with Apollo's useSubscription (see features/lives/useMyLives).
+export const MyLivesUpdates = graphql(`
+  subscription MyLivesUpdates {
     myLives {
       ...LiveFields
     }
   }
 `)
-
-export async function listMyLives(): Promise<LiveSummary[]> {
-  const data = await executeGraphQL(MyLives)
-  return data.myLives
-}
 
 const CreatePublisherSession = graphql(`
   mutation CreatePublisherSession($liveId: ID!) {

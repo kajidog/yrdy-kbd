@@ -102,6 +102,9 @@ type SignedURL struct {
 	SignedURL string `json:"signedUrl"`
 }
 
+type Subscription struct {
+}
+
 type ViewerSessionInput struct {
 	LiveID     string  `json:"liveId"`
 	ClientID   string  `json:"clientId"`

@@ -363,6 +363,36 @@ func (r *queryResolver) Live(ctx context.Context, id string) (*model.Live, error
 	return r.toLive(entry, user.ID), nil
 }
 
+// MyLives is the resolver for the myLives field.
+func (r *subscriptionResolver) MyLives(ctx context.Context) (<-chan []*model.Live, error) {
+	user, err := auth.FromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Poll the store on the server side and push the full list on every
+	// tick, starting with the current state right away.
+	updates := make(chan []*model.Live, 1)
+	go func() {
+		defer close(updates)
+		ticker := time.NewTicker(myLivesPollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case updates <- r.toLives(r.LiveStore.ListByOwner(user.ID), user.ID):
+			case <-ctx.Done():
+				return
+			}
+			select {
+			case <-ticker.C:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return updates, nil
+}
+
 func validateSignalingURLInput(entry live.Live, input model.SignSignalingURLInput) error {
 	if input.Endpoint == "" {
 		return fmt.Errorf("endpoint is required")
@@ -395,7 +425,11 @@ func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
+// Subscription returns SubscriptionResolver implementation.
+func (r *Resolver) Subscription() SubscriptionResolver { return &subscriptionResolver{r} }
+
 type (
-	mutationResolver struct{ *Resolver }
-	queryResolver    struct{ *Resolver }
+	mutationResolver     struct{ *Resolver }
+	queryResolver        struct{ *Resolver }
+	subscriptionResolver struct{ *Resolver }
 )
