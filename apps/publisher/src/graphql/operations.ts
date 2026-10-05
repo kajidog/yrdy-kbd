@@ -54,9 +54,9 @@ export async function createLive(input: CreateLiveInput): Promise<LiveSummary> {
   return data.createLive
 }
 
-// Used with Apollo's useQuery (see features/lives/useMyLives).
-export const MyLives = graphql(`
-  query MyLives {
+// Used with Apollo's useSubscription (see features/lives/useMyLives).
+export const MyLivesUpdates = graphql(`
+  subscription MyLivesUpdates {
     myLives {
       ...LiveFields
     }

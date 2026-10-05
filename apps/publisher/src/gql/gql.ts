@@ -16,7 +16,7 @@ import type { TypedDocumentNode as DocumentNode } from '@graphql-typed-document-
 type Documents = {
     "\n  fragment LiveFields on Live {\n    id\n    title\n    ownerName\n    public\n    record\n    status\n    hasPassphrase\n    hasRecording\n    owned\n    createdAt\n    startedAt\n    endedAt\n    durationSeconds\n    watchUrl\n  }\n": typeof types.LiveFieldsFragmentDoc,
     "\n  mutation CreateLive($input: CreateLiveInput!) {\n    createLive(input: $input) {\n      ...LiveFields\n    }\n  }\n": typeof types.CreateLiveDocument,
-    "\n  query MyLives {\n    myLives {\n      ...LiveFields\n    }\n  }\n": typeof types.MyLivesDocument,
+    "\n  subscription MyLivesUpdates {\n    myLives {\n      ...LiveFields\n    }\n  }\n": typeof types.MyLivesUpdatesDocument,
     "\n  mutation CreatePublisherSession($liveId: ID!) {\n    createPublisherSession(liveId: $liveId) {\n      liveId\n      role\n      region\n      channelArn\n      endpoints {\n        wss\n        https\n      }\n      iceServers {\n        urls\n        username\n        credential\n        ttl\n      }\n    }\n  }\n": typeof types.CreatePublisherSessionDocument,
     "\n  mutation JoinStorageSession($liveId: ID!) {\n    joinStorageSession(liveId: $liveId)\n  }\n": typeof types.JoinStorageSessionDocument,
     "\n  mutation StopLive($liveId: ID!) {\n    stopLive(liveId: $liveId) {\n      ...LiveFields\n    }\n  }\n": typeof types.StopLiveDocument,
@@ -25,7 +25,7 @@ type Documents = {
 const documents: Documents = {
     "\n  fragment LiveFields on Live {\n    id\n    title\n    ownerName\n    public\n    record\n    status\n    hasPassphrase\n    hasRecording\n    owned\n    createdAt\n    startedAt\n    endedAt\n    durationSeconds\n    watchUrl\n  }\n": types.LiveFieldsFragmentDoc,
     "\n  mutation CreateLive($input: CreateLiveInput!) {\n    createLive(input: $input) {\n      ...LiveFields\n    }\n  }\n": types.CreateLiveDocument,
-    "\n  query MyLives {\n    myLives {\n      ...LiveFields\n    }\n  }\n": types.MyLivesDocument,
+    "\n  subscription MyLivesUpdates {\n    myLives {\n      ...LiveFields\n    }\n  }\n": types.MyLivesUpdatesDocument,
     "\n  mutation CreatePublisherSession($liveId: ID!) {\n    createPublisherSession(liveId: $liveId) {\n      liveId\n      role\n      region\n      channelArn\n      endpoints {\n        wss\n        https\n      }\n      iceServers {\n        urls\n        username\n        credential\n        ttl\n      }\n    }\n  }\n": types.CreatePublisherSessionDocument,
     "\n  mutation JoinStorageSession($liveId: ID!) {\n    joinStorageSession(liveId: $liveId)\n  }\n": types.JoinStorageSessionDocument,
     "\n  mutation StopLive($liveId: ID!) {\n    stopLive(liveId: $liveId) {\n      ...LiveFields\n    }\n  }\n": types.StopLiveDocument,
@@ -57,7 +57,7 @@ export function graphql(source: "\n  mutation CreateLive($input: CreateLiveInput
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
-export function graphql(source: "\n  query MyLives {\n    myLives {\n      ...LiveFields\n    }\n  }\n"): (typeof documents)["\n  query MyLives {\n    myLives {\n      ...LiveFields\n    }\n  }\n"];
+export function graphql(source: "\n  subscription MyLivesUpdates {\n    myLives {\n      ...LiveFields\n    }\n  }\n"): (typeof documents)["\n  subscription MyLivesUpdates {\n    myLives {\n      ...LiveFields\n    }\n  }\n"];
 /**
  * The graphql function is used to parse GraphQL queries into a document that can be used by GraphQL clients.
  */
