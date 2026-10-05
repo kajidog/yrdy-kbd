@@ -9,6 +9,7 @@ export {
   type AuthSession,
 } from './auth/auth'
 export { AuthGate } from './auth/AuthGate'
+export { createApolloClient } from './graphql/apollo'
 export { executeGraphQL, GraphQLRequestError } from './graphql/client'
 export {
   browserLogger,

@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createPublisherSession,
   joinStorageSession,
-  listMyLives,
   signSignalingUrl,
   stopLive,
   type LiveSummary,
@@ -18,11 +17,12 @@ import {
 import { BroadcastPanel } from '../broadcast/BroadcastPanel'
 import { CreateLivePanel } from '../lives/CreateLivePanel'
 import { MyLivesPanel } from '../lives/MyLivesPanel'
+import { useMyLives, waitForLives } from '../lives/useMyLives'
 
 export type BroadcastStatus = 'idle' | 'starting' | 'live' | 'error'
 
 export function Dashboard({ session, onSignOut }: { session: AuthSession; onSignOut: () => void }) {
-  const [lives, setLives] = useState<LiveSummary[]>([])
+  const { lives, error: livesError, refetch } = useMyLives()
   const [selectedId, setSelectedId] = useState('')
 
   const [status, setStatus] = useState<BroadcastStatus>('idle')
@@ -39,18 +39,6 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
   const storageRejoinsRef = useRef(0)
 
   const selected = lives.find((live) => live.id === selectedId) ?? null
-
-  const refreshLives = useCallback(async () => {
-    try {
-      setLives(await listMyLives())
-    } catch (caught) {
-      setError(errorMessage(caught))
-    }
-  }, [])
-
-  useEffect(() => {
-    void refreshLives()
-  }, [refreshLives])
 
   const releaseBroadcast = useCallback(() => {
     runtimeRef.current?.stop()
@@ -81,7 +69,9 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
     })
     setSelectedId(live.id)
     setStatusText('Live is ready to broadcast')
-    await refreshLives()
+    await waitForLives(refetch, (lives) => lives.some((item) => item.id === live.id)).catch(
+      (caught) => setError(errorMessage(caught)),
+    )
   }
 
   async function handleStartBroadcast() {
@@ -102,6 +92,10 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
     storageRejoinsRef.current = 0
 
     try {
+      // Refetch before the request so the confirmation below starts from
+      // the latest state.
+      await refetch()
+
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
         audio: true,
@@ -234,7 +228,10 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
         live_id: live.id,
         recording_enabled: live.record,
       })
-      await refreshLives()
+      await waitForLives(
+        refetch,
+        (lives) => lives.find((item) => item.id === live.id)?.status === 'LIVE',
+      )
     } catch (caught) {
       const caughtError = caught instanceof Error ? caught : new Error(String(caught))
       browserLogger.error(
@@ -268,6 +265,7 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
     setStatusText('Broadcast stopped')
     if (liveId) {
       try {
+        await refetch()
         await stopLive(liveId)
         browserLogger.info('Broadcast stopped', {
           event_name: 'broadcast_stopped',
@@ -284,8 +282,12 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
           caughtError,
         )
         setError(errorMessage(caught))
+        return
       }
-      await refreshLives()
+      await waitForLives(
+        refetch,
+        (lives) => lives.find((item) => item.id === liveId)?.status === 'ENDED',
+      ).catch((caught) => setError(errorMessage(caught)))
     }
   }
 
@@ -327,7 +329,7 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
               lives={lives}
               selectedId={selectedId}
               onSelect={setSelectedId}
-              onRefresh={() => void refreshLives()}
+              onRefresh={() => void refetch()}
             />
           </div>
 
@@ -336,7 +338,7 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
             isLive={isLive}
             canBroadcast={canBroadcast}
             peerCount={peerCount}
-            error={error}
+            error={error || livesError}
             videoRef={videoRef}
             onStart={() => void handleStartBroadcast()}
             onStop={() => void handleStopBroadcast()}

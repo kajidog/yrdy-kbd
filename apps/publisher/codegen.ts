@@ -13,7 +13,6 @@ const config: CodegenConfig = {
         fragmentMasking: false,
       },
       config: {
-        documentMode: 'string',
         useTypeImports: true,
         enumsAsTypes: true,
         scalars: {

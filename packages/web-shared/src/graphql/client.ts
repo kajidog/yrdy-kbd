@@ -1,4 +1,5 @@
 import type { DocumentTypeDecoration } from '@graphql-typed-document-node/core'
+import { print, type DocumentNode } from 'graphql'
 import { getIdToken } from '../auth/auth'
 import { browserLogger } from '../logging/logger'
 
@@ -13,11 +14,13 @@ type GraphQLResponse<TResult> = {
 
 // executeGraphQL posts a codegen-typed document (the `graphql()` tagged
 // operations generated into each app's src/gql) to the BFF's /graphql
-// endpoint with the caller's ID token attached.
+// endpoint with the caller's ID token attached. It accepts both string-mode
+// documents and DocumentNodes (the form Apollo Client consumes).
 export async function executeGraphQL<TResult, TVariables>(
-  document: DocumentTypeDecoration<TResult, TVariables> & { toString(): string },
+  document: DocumentTypeDecoration<TResult, TVariables> & ({ toString(): string } | DocumentNode),
   variables?: TVariables,
 ): Promise<TResult> {
+  const query = isDocumentNode(document) ? print(document) : document.toString()
   const requestID = crypto.randomUUID()
   const token = await getIdToken()
   let response: Response
@@ -30,7 +33,7 @@ export async function executeGraphQL<TResult, TVariables>(
         Authorization: `Bearer ${token}`,
         'X-Request-ID': requestID,
       },
-      body: JSON.stringify({ query: document.toString(), variables }),
+      body: JSON.stringify({ query, variables }),
     })
   } catch (caught) {
     const error = caught instanceof Error ? caught : new Error(String(caught))
@@ -88,4 +91,8 @@ export async function executeGraphQL<TResult, TVariables>(
     throw error
   }
   return payload.data
+}
+
+function isDocumentNode(document: object): document is DocumentNode {
+  return (document as Partial<DocumentNode>).kind === 'Document'
 }

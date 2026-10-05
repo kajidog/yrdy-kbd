@@ -1,5 +1,5 @@
 /* eslint-disable */
-import type { DocumentTypeDecoration } from '@graphql-typed-document-node/core';
+import type { TypedDocumentNode as DocumentNode } from '@graphql-typed-document-node/core';
 export type Maybe<T> = T | null;
 export type InputMaybe<T> = T | null | undefined;
 export type Exact<T extends { [key: string]: unknown }> = { [K in keyof T]: T[K] };
@@ -245,137 +245,10 @@ export type SignSignalingUrlMutationVariables = Exact<{
 
 export type SignSignalingUrlMutation = { __typename?: 'Mutation', signSignalingUrl: { __typename?: 'SignedUrl', signedUrl: string } };
 
-export class TypedDocumentString<TResult, TVariables>
-  extends String
-  implements DocumentTypeDecoration<TResult, TVariables>
-{
-  __apiType?: NonNullable<DocumentTypeDecoration<TResult, TVariables>['__apiType']>;
-  private value: string;
-  public __meta__?: Record<string, any> | undefined;
-
-  constructor(value: string, __meta__?: Record<string, any> | undefined) {
-    super(value);
-    this.value = value;
-    this.__meta__ = __meta__;
-  }
-
-  override toString(): string & DocumentTypeDecoration<TResult, TVariables> {
-    return this.value;
-  }
-}
-export const LiveFieldsFragmentDoc = new TypedDocumentString(`
-    fragment LiveFields on Live {
-  id
-  title
-  ownerName
-  public
-  record
-  status
-  hasPassphrase
-  hasRecording
-  owned
-  createdAt
-  startedAt
-  endedAt
-  durationSeconds
-  watchUrl
-}
-    `, {"fragmentName":"LiveFields"}) as unknown as TypedDocumentString<LiveFieldsFragment, unknown>;
-export const CreateLiveDocument = new TypedDocumentString(`
-    mutation CreateLive($input: CreateLiveInput!) {
-  createLive(input: $input) {
-    ...LiveFields
-  }
-}
-    fragment LiveFields on Live {
-  id
-  title
-  ownerName
-  public
-  record
-  status
-  hasPassphrase
-  hasRecording
-  owned
-  createdAt
-  startedAt
-  endedAt
-  durationSeconds
-  watchUrl
-}`) as unknown as TypedDocumentString<CreateLiveMutation, CreateLiveMutationVariables>;
-export const MyLivesDocument = new TypedDocumentString(`
-    query MyLives {
-  myLives {
-    ...LiveFields
-  }
-}
-    fragment LiveFields on Live {
-  id
-  title
-  ownerName
-  public
-  record
-  status
-  hasPassphrase
-  hasRecording
-  owned
-  createdAt
-  startedAt
-  endedAt
-  durationSeconds
-  watchUrl
-}`) as unknown as TypedDocumentString<MyLivesQuery, MyLivesQueryVariables>;
-export const CreatePublisherSessionDocument = new TypedDocumentString(`
-    mutation CreatePublisherSession($liveId: ID!) {
-  createPublisherSession(liveId: $liveId) {
-    liveId
-    role
-    region
-    channelArn
-    endpoints {
-      wss
-      https
-    }
-    iceServers {
-      urls
-      username
-      credential
-      ttl
-    }
-  }
-}
-    `) as unknown as TypedDocumentString<CreatePublisherSessionMutation, CreatePublisherSessionMutationVariables>;
-export const JoinStorageSessionDocument = new TypedDocumentString(`
-    mutation JoinStorageSession($liveId: ID!) {
-  joinStorageSession(liveId: $liveId)
-}
-    `) as unknown as TypedDocumentString<JoinStorageSessionMutation, JoinStorageSessionMutationVariables>;
-export const StopLiveDocument = new TypedDocumentString(`
-    mutation StopLive($liveId: ID!) {
-  stopLive(liveId: $liveId) {
-    ...LiveFields
-  }
-}
-    fragment LiveFields on Live {
-  id
-  title
-  ownerName
-  public
-  record
-  status
-  hasPassphrase
-  hasRecording
-  owned
-  createdAt
-  startedAt
-  endedAt
-  durationSeconds
-  watchUrl
-}`) as unknown as TypedDocumentString<StopLiveMutation, StopLiveMutationVariables>;
-export const SignSignalingUrlDocument = new TypedDocumentString(`
-    mutation SignSignalingUrl($input: SignSignalingUrlInput!) {
-  signSignalingUrl(input: $input) {
-    signedUrl
-  }
-}
-    `) as unknown as TypedDocumentString<SignSignalingUrlMutation, SignSignalingUrlMutationVariables>;
+export const LiveFieldsFragmentDoc = {"kind":"Document","definitions":[{"kind":"FragmentDefinition","name":{"kind":"Name","value":"LiveFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Live"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"title"}},{"kind":"Field","name":{"kind":"Name","value":"ownerName"}},{"kind":"Field","name":{"kind":"Name","value":"public"}},{"kind":"Field","name":{"kind":"Name","value":"record"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"hasPassphrase"}},{"kind":"Field","name":{"kind":"Name","value":"hasRecording"}},{"kind":"Field","name":{"kind":"Name","value":"owned"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}},{"kind":"Field","name":{"kind":"Name","value":"startedAt"}},{"kind":"Field","name":{"kind":"Name","value":"endedAt"}},{"kind":"Field","name":{"kind":"Name","value":"durationSeconds"}},{"kind":"Field","name":{"kind":"Name","value":"watchUrl"}}]}}]} as unknown as DocumentNode<LiveFieldsFragment, unknown>;
+export const CreateLiveDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"CreateLive"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"CreateLiveInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"createLive"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"LiveFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"LiveFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Live"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"title"}},{"kind":"Field","name":{"kind":"Name","value":"ownerName"}},{"kind":"Field","name":{"kind":"Name","value":"public"}},{"kind":"Field","name":{"kind":"Name","value":"record"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"hasPassphrase"}},{"kind":"Field","name":{"kind":"Name","value":"hasRecording"}},{"kind":"Field","name":{"kind":"Name","value":"owned"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}},{"kind":"Field","name":{"kind":"Name","value":"startedAt"}},{"kind":"Field","name":{"kind":"Name","value":"endedAt"}},{"kind":"Field","name":{"kind":"Name","value":"durationSeconds"}},{"kind":"Field","name":{"kind":"Name","value":"watchUrl"}}]}}]} as unknown as DocumentNode<CreateLiveMutation, CreateLiveMutationVariables>;
+export const MyLivesDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"MyLives"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"myLives"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"LiveFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"LiveFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Live"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"title"}},{"kind":"Field","name":{"kind":"Name","value":"ownerName"}},{"kind":"Field","name":{"kind":"Name","value":"public"}},{"kind":"Field","name":{"kind":"Name","value":"record"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"hasPassphrase"}},{"kind":"Field","name":{"kind":"Name","value":"hasRecording"}},{"kind":"Field","name":{"kind":"Name","value":"owned"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}},{"kind":"Field","name":{"kind":"Name","value":"startedAt"}},{"kind":"Field","name":{"kind":"Name","value":"endedAt"}},{"kind":"Field","name":{"kind":"Name","value":"durationSeconds"}},{"kind":"Field","name":{"kind":"Name","value":"watchUrl"}}]}}]} as unknown as DocumentNode<MyLivesQuery, MyLivesQueryVariables>;
+export const CreatePublisherSessionDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"CreatePublisherSession"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"liveId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ID"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"createPublisherSession"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"liveId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"liveId"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"liveId"}},{"kind":"Field","name":{"kind":"Name","value":"role"}},{"kind":"Field","name":{"kind":"Name","value":"region"}},{"kind":"Field","name":{"kind":"Name","value":"channelArn"}},{"kind":"Field","name":{"kind":"Name","value":"endpoints"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"wss"}},{"kind":"Field","name":{"kind":"Name","value":"https"}}]}},{"kind":"Field","name":{"kind":"Name","value":"iceServers"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"urls"}},{"kind":"Field","name":{"kind":"Name","value":"username"}},{"kind":"Field","name":{"kind":"Name","value":"credential"}},{"kind":"Field","name":{"kind":"Name","value":"ttl"}}]}}]}}]}}]} as unknown as DocumentNode<CreatePublisherSessionMutation, CreatePublisherSessionMutationVariables>;
+export const JoinStorageSessionDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"JoinStorageSession"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"liveId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ID"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"joinStorageSession"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"liveId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"liveId"}}}]}]}}]} as unknown as DocumentNode<JoinStorageSessionMutation, JoinStorageSessionMutationVariables>;
+export const StopLiveDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"StopLive"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"liveId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ID"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"stopLive"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"liveId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"liveId"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"FragmentSpread","name":{"kind":"Name","value":"LiveFields"}}]}}]}},{"kind":"FragmentDefinition","name":{"kind":"Name","value":"LiveFields"},"typeCondition":{"kind":"NamedType","name":{"kind":"Name","value":"Live"}},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"title"}},{"kind":"Field","name":{"kind":"Name","value":"ownerName"}},{"kind":"Field","name":{"kind":"Name","value":"public"}},{"kind":"Field","name":{"kind":"Name","value":"record"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"hasPassphrase"}},{"kind":"Field","name":{"kind":"Name","value":"hasRecording"}},{"kind":"Field","name":{"kind":"Name","value":"owned"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}},{"kind":"Field","name":{"kind":"Name","value":"startedAt"}},{"kind":"Field","name":{"kind":"Name","value":"endedAt"}},{"kind":"Field","name":{"kind":"Name","value":"durationSeconds"}},{"kind":"Field","name":{"kind":"Name","value":"watchUrl"}}]}}]} as unknown as DocumentNode<StopLiveMutation, StopLiveMutationVariables>;
+export const SignSignalingUrlDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"SignSignalingUrl"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"SignSignalingUrlInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"signSignalingUrl"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"signedUrl"}}]}}]}}]} as unknown as DocumentNode<SignSignalingUrlMutation, SignSignalingUrlMutationVariables>;
