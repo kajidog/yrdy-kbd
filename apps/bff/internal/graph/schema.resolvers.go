@@ -370,8 +370,26 @@ func (r *subscriptionResolver) MyLives(ctx context.Context) (<-chan []*model.Liv
 		return nil, err
 	}
 
+	// The token is only checked when the stream opens, so end the stream
+	// when it expires; the client then resubscribes with a fresh token.
+	var expired <-chan time.Time
+	if !user.ExpiresAt.IsZero() {
+		untilExpiry := time.Until(user.ExpiresAt)
+		if untilExpiry <= 0 {
+			return nil, fmt.Errorf("token has expired")
+		}
+		expired = time.After(untilExpiry)
+	}
+	// End the stream when the server starts shutting down, so
+	// http.Server.Shutdown does not wait for the client to disconnect.
+	var shutdown <-chan struct{}
+	if r.Streams != nil {
+		shutdown = r.Streams.Done()
+	}
+
 	// Poll the store on the server side and push the full list on every
-	// tick, starting with the current state right away.
+	// tick, starting with the current state right away. Closing the channel
+	// ends the SSE stream with a "complete" event.
 	updates := make(chan []*model.Live, 1)
 	go func() {
 		defer close(updates)
@@ -382,10 +400,18 @@ func (r *subscriptionResolver) MyLives(ctx context.Context) (<-chan []*model.Liv
 			case updates <- r.toLives(r.LiveStore.ListByOwner(user.ID), user.ID):
 			case <-ctx.Done():
 				return
+			case <-expired:
+				return
+			case <-shutdown:
+				return
 			}
 			select {
 			case <-ticker.C:
 			case <-ctx.Done():
+				return
+			case <-expired:
+				return
+			case <-shutdown:
 				return
 			}
 		}

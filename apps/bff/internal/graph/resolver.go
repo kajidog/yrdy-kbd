@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"context"
 	"time"
 
 	"yrdy-kbd/apps/bff/internal/config"
@@ -18,4 +19,8 @@ type Resolver struct {
 	Cfg       config.Config
 	KVS       kvs.Client
 	LiveStore *live.Store
+	// Streams is canceled when the server starts shutting down; open
+	// subscriptions end then so http.Server.Shutdown does not wait on them.
+	// Nil means subscriptions only end with their request.
+	Streams context.Context
 }

@@ -3,6 +3,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"log/slog"
@@ -24,9 +25,11 @@ import (
 	"yrdy-kbd/apps/bff/internal/live"
 )
 
-func New(cfg config.Config, kvsClient kvs.Client, lives *live.Store) http.Handler {
+// New builds the BFF's HTTP handler. Open subscriptions end when streams is
+// canceled; cancel it when shutdown begins.
+func New(cfg config.Config, kvsClient kvs.Client, lives *live.Store, streams context.Context) http.Handler {
 	gql := handler.New(graph.NewExecutableSchema(graph.Config{
-		Resolvers: &graph.Resolver{Cfg: cfg, KVS: kvsClient, LiveStore: lives},
+		Resolvers: &graph.Resolver{Cfg: cfg, KVS: kvsClient, LiveStore: lives, Streams: streams},
 	}))
 	gql.AddTransport(transport.Options{})
 	// SSE must come before POST: both accept JSON POSTs, and SSE claims the

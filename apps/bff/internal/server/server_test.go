@@ -76,6 +76,13 @@ func (f *fakeKVSClient) HLSPlaybackURL(_ context.Context, input kvs.HLSPlaybackI
 
 func newTestServer(t *testing.T) (http.Handler, *fakeKVSClient) {
 	t.Helper()
+	streams, closeStreams := context.WithCancel(context.Background())
+	t.Cleanup(closeStreams)
+	return newTestServerWithStreams(t, streams)
+}
+
+func newTestServerWithStreams(t *testing.T, streams context.Context) (http.Handler, *fakeKVSClient) {
+	t.Helper()
 	fake := &fakeKVSClient{
 		channelARN: "arn:aws:kinesisvideo:ap-northeast-1:123456789012:channel/yrdy-kbd-test/1",
 		streamARN:  "arn:aws:kinesisvideo:ap-northeast-1:123456789012:stream/yrdy-kbd-test/1",
@@ -100,15 +107,20 @@ func newTestServer(t *testing.T) (http.Handler, *fakeKVSClient) {
 	if err != nil {
 		t.Fatalf("new live store: %v", err)
 	}
-	return New(cfg, fake, lives), fake
+	return New(cfg, fake, lives, streams), fake
 }
 
 func bearerToken(t *testing.T, sub, username string) string {
 	t.Helper()
-	payload, err := json.Marshal(map[string]string{
+	return bearerTokenWithClaims(t, map[string]any{
 		"sub":              sub,
 		"cognito:username": username,
 	})
+}
+
+func bearerTokenWithClaims(t *testing.T, claims map[string]any) string {
+	t.Helper()
+	payload, err := json.Marshal(claims)
 	if err != nil {
 		t.Fatalf("marshal claims: %v", err)
 	}
@@ -690,4 +702,70 @@ func TestMyLivesSubscriptionRequiresToken(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("timed out waiting for an SSE event")
 	}
+}
+
+// waitForStreamEnd drains events until the server ends the SSE stream.
+func waitForStreamEnd(t *testing.T, events <-chan gqlResponse, timeout time.Duration) {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case _, ok := <-events:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("SSE stream did not end")
+		}
+	}
+}
+
+func TestMyLivesSubscriptionEndsWhenTokenExpires(t *testing.T) {
+	handler, _ := newTestServer(t)
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	token := bearerTokenWithClaims(t, map[string]any{
+		"sub":              "owner-sub",
+		"cognito:username": "alice",
+		"exp":              time.Now().Add(2 * time.Second).Unix(),
+	})
+
+	events := sseEvents(t, server.URL, token, `subscription { myLives { id } }`)
+	nextMyLives(t, events)
+	waitForStreamEnd(t, events, 5*time.Second)
+}
+
+func TestMyLivesSubscriptionRejectsExpiredToken(t *testing.T) {
+	handler, _ := newTestServer(t)
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	token := bearerTokenWithClaims(t, map[string]any{
+		"sub":              "owner-sub",
+		"cognito:username": "alice",
+		"exp":              time.Now().Add(-time.Minute).Unix(),
+	})
+
+	events := sseEvents(t, server.URL, token, `subscription { myLives { id } }`)
+	select {
+	case resp := <-events:
+		if len(resp.Errors) == 0 || !strings.Contains(resp.Errors[0].Message, "token has expired") {
+			t.Fatalf("errors = %+v, want token expired error", resp.Errors)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for an SSE event")
+	}
+}
+
+func TestMyLivesSubscriptionEndsWhenStreamsAreClosed(t *testing.T) {
+	streams, closeStreams := context.WithCancel(context.Background())
+	t.Cleanup(closeStreams)
+	handler, _ := newTestServerWithStreams(t, streams)
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	owner, _ := tokens(t)
+
+	events := sseEvents(t, server.URL, owner, `subscription { myLives { id } }`)
+	nextMyLives(t, events)
+	closeStreams()
+	waitForStreamEnd(t, events, 5*time.Second)
 }

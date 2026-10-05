@@ -48,11 +48,16 @@ func run() error {
 		return err
 	}
 
+	streams, closeStreams := context.WithCancel(context.Background())
+	defer closeStreams()
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           server.New(cfg, kvsClient, lives),
+		Handler:           server.New(cfg, kvsClient, lives, streams),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	// Shutdown waits for in-flight handlers, and SSE subscriptions never
+	// finish on their own; end them as soon as shutdown begins.
+	httpServer.RegisterOnShutdown(closeStreams)
 
 	errs := make(chan error, 1)
 	go func() {

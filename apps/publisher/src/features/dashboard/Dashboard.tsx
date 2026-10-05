@@ -224,7 +224,11 @@ export function Dashboard({ session, onSignOut }: { session: AuthSession; onSign
         live_id: live.id,
         recording_enabled: live.record,
       })
-      await waitFor((lives) => lives.find((item) => item.id === live.id)?.status === 'LIVE')
+      // The broadcast is already running; a slow list update is not a
+      // reason to tear it down, so only report it.
+      await waitFor(
+        (lives) => lives.find((item) => item.id === live.id)?.status === 'LIVE',
+      ).catch((caught) => setError(errorMessage(caught)))
     } catch (caught) {
       const caughtError = caught instanceof Error ? caught : new Error(String(caught))
       browserLogger.error(
