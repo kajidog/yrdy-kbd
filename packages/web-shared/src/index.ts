@@ -10,6 +10,7 @@ export {
 } from './auth/auth'
 export { AuthGate } from './auth/AuthGate'
 export { createApolloClient } from './graphql/apollo'
+export { SSELink } from './graphql/sseLink'
 export { executeGraphQL, GraphQLRequestError } from './graphql/client'
 export {
   browserLogger,
