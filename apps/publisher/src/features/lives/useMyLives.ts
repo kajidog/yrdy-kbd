@@ -21,6 +21,9 @@ export function useMyLives() {
       latestRef.current = lives
       waitersRef.current.forEach((notify) => notify(lives))
     },
+    // The BFF ends the stream when the ID token expires or the server shuts
+    // down; resubscribe so a fresh token (and a live server) is used.
+    onComplete: (): void => restart(),
   })
 
   // waitFor resolves once a pushed list satisfies predicate, for up to 10

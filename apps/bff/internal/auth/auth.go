@@ -11,11 +11,14 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 type User struct {
 	ID   string
 	Name string
+	// ExpiresAt is the token's exp claim; zero when the token has none.
+	ExpiresAt time.Time
 }
 
 type contextKey struct{}
@@ -62,11 +65,12 @@ func UserFromToken(token string) (User, error) {
 	}
 
 	var claims struct {
-		Sub               string `json:"sub"`
-		CognitoUsername   string `json:"cognito:username"`
-		PreferredUsername string `json:"preferred_username"`
-		Username          string `json:"username"`
-		Email             string `json:"email"`
+		Sub               string  `json:"sub"`
+		Exp               float64 `json:"exp"` // NumericDate; may be fractional
+		CognitoUsername   string  `json:"cognito:username"`
+		PreferredUsername string  `json:"preferred_username"`
+		Username          string  `json:"username"`
+		Email             string  `json:"email"`
 	}
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return User{}, fmt.Errorf("parse token claims: %w", err)
@@ -79,7 +83,11 @@ func UserFromToken(token string) (User, error) {
 	if name == "" {
 		name = claims.Sub
 	}
-	return User{ID: claims.Sub, Name: name}, nil
+	user := User{ID: claims.Sub, Name: name}
+	if claims.Exp != 0 {
+		user.ExpiresAt = time.UnixMilli(int64(claims.Exp * 1000))
+	}
+	return user, nil
 }
 
 func firstNonEmpty(values ...string) string {
